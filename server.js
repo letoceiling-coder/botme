@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { MODELS, callWithFallback, recordUsage, readGeneratorStats, resetGeneratorStats } from './src/llm.js';
 import assistantsRouter from './src/assistants/routes.js';
 import publicApiRouter from './src/public-api/routes.js';
+import agentChatRouter from './src/agent-chat/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -666,6 +667,12 @@ app.delete('/api/stats', async (_req, res) => {
 });
 
 // =============================================================
+// Простой чат-агент (выбор модели, без RAG и без генерации сайтов)
+// POST /api/agent/chat { model, messages[], temperature?, systemPrompt? }
+// =============================================================
+app.use('/api/agent', agentChatRouter);
+
+// =============================================================
 // Модуль AI-ассистентов (RAG, база знаний, чат, статистика, токены)
 // =============================================================
 app.use('/api/assistants', assistantsRouter);
@@ -677,6 +684,7 @@ app.use('/api/v1', publicApiRouter);
 
 app.listen(PORT, () => {
   console.log(`\n🚀 AI Site Builder запущен:  http://localhost:${PORT}`);
+  console.log(`💬 Простой чат-агент:          http://localhost:${PORT}/agent/`);
   console.log(`🤖 Ассистенты:                http://localhost:${PORT}/assistant/`);
   console.log(`🔑 Публичный API:             http://localhost:${PORT}/api/v1/`);
   console.log(`📁 Проекты сохраняются в:    ${PROJECTS_DIR}\n`);

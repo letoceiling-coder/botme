@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Простой чат — выбор модели</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: '#0b0d12', panel: '#11141b', panel2: '#161a23', border: '#222836',
+          text: '#e6e8ee', muted: '#8a93a6', brand: '#7c5cff', brand2: '#22d3ee',
+        },
+      },
+    },
+  };
+</script>
+<link rel="stylesheet" href="/style.css" />
+<style>
+  #messages { scrollbar-width: thin; scrollbar-color: #2a3142 transparent; }
+  .bubble-user { background: linear-gradient(135deg, #7c5cff, #22d3ee); color: white; border-bottom-right-radius: 4px; }
+  .bubble-ai { background: #161a23; border: 1px solid #222836; border-bottom-left-radius: 4px; }
+</style>
+</head>
+<body class="bg-bg text-text antialiased h-screen overflow-hidden">
+
+<div class="flex h-screen">
+  <aside class="w-[280px] shrink-0 bg-panel border-r border-border flex flex-col">
+    <div class="p-4 border-b border-border flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-brand2 flex items-center justify-center text-white font-bold text-sm">💬</div>
+      <div class="min-w-0">
+        <div class="font-semibold text-sm truncate">Простой агент</div>
+        <div class="text-[11px] text-muted">Без RAG и генерации сайтов</div>
+      </div>
+    </div>
+
+    <div class="p-3 border-b border-border space-y-3">
+      <div>
+        <label class="block text-[11px] uppercase tracking-wider text-muted mb-1">Модель</label>
+        <select id="modelSelect"
+          class="w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/50"></select>
+      </div>
+      <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+        <input type="checkbox" id="streamToggle" checked class="rounded border-border bg-panel2 text-brand focus:ring-brand/40" />
+        Стриминг ответа
+      </label>
+      <div>
+        <label class="block text-[11px] text-muted mb-1">Температура (0–2, пусто = по умолчанию)</label>
+        <input type="number" id="temperature" min="0" max="2" step="0.05" placeholder="0.65"
+          class="w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/50" />
+      </div>
+      <details class="text-sm">
+        <summary class="text-muted cursor-pointer hover:text-text/90">Системный промпт</summary>
+        <textarea id="systemPrompt" rows="4" placeholder="Пусто — встроенный промпт по умолчанию"
+          class="mt-2 w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand/50 resize-y min-h-[80px]"></textarea>
+      </details>
+    </div>
+
+    <div class="flex-1" />
+
+    <div class="p-3 border-t border-border space-y-2">
+      <button type="button" id="newChatBtn"
+        class="w-full px-3 py-2 rounded-lg bg-panel2 hover:bg-panel2/70 border border-border text-sm transition">
+        Новый чат
+      </button>
+      <a href="/"
+        class="block w-full text-center px-3 py-2 rounded-lg bg-gradient-to-r from-brand/20 to-brand2/15 hover:from-brand/30 border border-brand/30 text-sm transition">
+        ← Site Builder
+      </a>
+    </div>
+  </aside>
+
+  <main class="flex-1 flex flex-col min-w-0 bg-panel">
+    <header class="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h1 class="text-sm font-medium truncate">Диалог</h1>
+        <p id="statusLine" class="text-[11px] text-muted truncate">Готов</p>
+      </div>
+    </header>
+
+    <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+
+    <form id="chatForm" class="p-3 border-t border-border bg-panel">
+      <div class="flex flex-col gap-2 bg-panel2 border border-border rounded-xl p-2 focus-within:border-brand/50 transition">
+        <textarea id="prompt" rows="3" placeholder="Введите сообщение…"
+          class="w-full bg-transparent resize-none outline-none text-sm placeholder:text-muted"></textarea>
+        <div class="flex justify-end">
+          <button type="submit" id="sendBtn"
+            class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-brand to-brand2 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition">
+            Отправить
+          </button>
+        </div>
+      </div>
+    </form>
+  </main>
+</div>
+
+<script>
+const HOST = location.origin;
+const $ = (s) => document.querySelector(s);
+
+let messages = []; // { role: 'user'|'assistant', content }
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
+}
+
+function scrollDown() {
+  const el = $('#messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendBubble(role, htmlOrText, { raw = false } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'flex gap-2 ' + (role === 'user' ? 'justify-end' : 'justify-start');
+  const inner = raw ? htmlOrText : escapeHtml(htmlOrText);
+  const bubbleClass = role === 'user' ? 'bubble-user' : 'bubble-ai';
+  wrap.innerHTML =
+    role === 'user'
+      ? `<div class="max-w-[85%] px-3 py-2 rounded-2xl text-[13.5px] leading-relaxed whitespace-pre-wrap break-words ${bubbleClass}">${inner}</div>`
+      : `<div class="w-7 h-7 shrink-0 rounded-lg bg-gradient-to-br from-brand to-brand2 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+         <div class="max-w-[85%] px-3 py-2 rounded-2xl text-[13.5px] leading-relaxed whitespace-pre-wrap break-words ${bubbleClass}">${inner}</div>`;
+  $('#messages').appendChild(wrap);
+  scrollDown();
+  return wrap.querySelector(role === 'user' ? '.bubble-user' : '.bubble-ai');
+}
+
+async function loadModels() {
+  const sel = $('#modelSelect');
+  sel.innerHTML = '';
+  try {
+    const r = await fetch(HOST + '/api/models');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const list = await r.json();
+    for (const m of list) {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = m.label || m.id;
+      sel.appendChild(o);
+    }
+    if (!list.length) sel.innerHTML = '<option value="">Нет моделей</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="">Ошибка загрузки</option>';
+    $('#statusLine').textContent = 'Модели: ' + e.message;
+  }
+}
+
+function bodyPayload() {
+  const tempRaw = $('#temperature').value.trim();
+  let temperature;
+  if (tempRaw !== '') {
+    const t = parseFloat(tempRaw);
+    if (!Number.isNaN(t)) temperature = Math.min(2, Math.max(0, t));
+  }
+  const sys = $('#systemPrompt').value.trim();
+  const payload = {
+    model: $('#modelSelect').value,
+    messages,
+  };
+  if (temperature !== undefined) payload.temperature = temperature;
+  if (sys) payload.systemPrompt = sys;
+  return payload;
+}
+
+function setStatus(t) {
+  $('#statusLine').textContent = t;
+}
+
+$('#newChatBtn').addEventListener('click', () => {
+  messages = [];
+  $('#messages').innerHTML = '';
+  setStatus('Новый чат');
+});
+
+$('#chatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#prompt');
+  const txt = input.value.trim();
+  if (!txt) return;
+  const model = $('#modelSelect').value;
+  if (!model) {
+    setStatus('Выберите модель');
+    return;
+  }
+
+  input.value = '';
+  $('#sendBtn').disabled = true;
+  messages.push({ role: 'user', content: txt });
+  appendBubble('user', txt);
+
+  const stream = $('#streamToggle').checked;
+  const typingWrap = document.createElement('div');
+  typingWrap.className = 'flex gap-2 justify-start';
+  typingWrap.innerHTML = `
+    <div class="w-7 h-7 shrink-0 rounded-lg bg-gradient-to-br from-brand to-brand2 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+    <div class="bubble-ai max-w-[85%] px-3 py-2 rounded-2xl text-[13.5px]">
+      <span class="inline-flex gap-1 items-center"><span class="w-1.5 h-1.5 rounded-full bg-muted animate-pulse"></span><span class="w-1.5 h-1.5 rounded-full bg-muted animate-pulse" style="animation-delay:.15s"></span><span class="w-1.5 h-1.5 rounded-full bg-muted animate-pulse" style="animation-delay:.3s"></span></span>
+    </div>`;
+  $('#messages').appendChild(typingWrap);
+  const bubble = typingWrap.querySelector('.bubble-ai');
+  scrollDown();
+
+  try {
+    if (!stream) {
+      const r = await fetch(HOST + '/api/agent/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyPayload()),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || j.message || 'HTTP ' + r.status);
+      const text = j.text || '';
+      messages.push({ role: 'assistant', content: text });
+      bubble.textContent = '';
+      bubble.textContent = text;
+      const fb = j.fallbackFrom ? ` · фоллбек с ${j.fallbackFrom}` : '';
+      setStatus(`Модель: ${j.modelUsed || model}${fb} · токенов: ${(j.usage && j.usage.total) ?? '—'}`);
+      scrollDown();
+      return;
+    }
+
+    const r = await fetch(HOST + '/api/agent/chat?stream=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyPayload()),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || j.message || 'HTTP ' + r.status);
+    }
+
+    let acc = '';
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() || '';
+      for (const evt of events) {
+        const lines = evt.split('\n');
+        let event = 'message';
+        let data = '';
+        for (const ln of lines) {
+          if (ln.startsWith('event:')) event = ln.slice(6).trim();
+          else if (ln.startsWith('data:')) data += ln.slice(5).trim();
+        }
+        if (!data) continue;
+        let payload;
+        try { payload = JSON.parse(data); } catch { continue; }
+        if (event === 'delta') {
+          if (acc === '') bubble.textContent = '';
+          acc += payload.text || '';
+          bubble.textContent = acc;
+          scrollDown();
+        } else if (event === 'done') {
+          const fb = payload.fallback_from ? ` · фоллбек с ${payload.fallback_from}` : '';
+          const u = payload.usage || {};
+          setStatus(`Модель: ${payload.model_used || model}${fb} · токенов: ${u.total ?? '—'}`);
+        } else if (event === 'error') {
+          throw new Error(payload.message || 'stream error');
+        }
+      }
+    }
+    messages.push({ role: 'assistant', content: acc });
+  } catch (err) {
+    bubble.innerHTML = '<span class="text-red-400">' + escapeHtml(err.message) + '</span>';
+  } finally {
+    $('#sendBtn').disabled = false;
+    input.focus();
+  }
+});
+
+loadModels();
+</script>
+</body>
+</html>
