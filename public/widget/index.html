@@ -74,15 +74,6 @@
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .sources {
-    margin-top: 6px; font-size: 11px; color: #8a93a6;
-  }
-  .sources details summary { cursor: pointer; color: #a78bfa; }
-  .source-item {
-    background: #0f1119; border: 1px solid #1a2030;
-    border-radius: 8px; padding: 6px 8px; margin-top: 4px;
-    font-size: 11px; color: #c9cdd9;
-  }
   .lead-card {
     background: #161a23; border: 1px solid var(--brand);
     border-radius: 14px; padding: 12px;
@@ -246,7 +237,6 @@ $('#composer').addEventListener('submit', async (e) => {
 
   let acc = '';
   let lead = null;
-  let sources = [];
   let convId = null;
 
   try {
@@ -288,7 +278,6 @@ $('#composer').addEventListener('submit', async (e) => {
           bubble.textContent = acc;
           scrollDown();
         } else if (event === 'done') {
-          sources = payload.sources || [];
           lead = payload.lead || null;
           convId = payload.conversation_id || null;
         } else if (event === 'error') {
@@ -297,8 +286,7 @@ $('#composer').addEventListener('submit', async (e) => {
       }
     }
 
-    // Финальный рендер с sources
-    bubble.innerHTML = escapeHtml(acc) + renderSources(sources);
+    bubble.innerHTML = escapeHtml(acc);
 
     // Триггер лида
     if (!leadOffered && lead && lead.shouldOffer) {
@@ -312,14 +300,6 @@ $('#composer').addEventListener('submit', async (e) => {
     $('#input').focus();
   }
 });
-
-function renderSources(sources) {
-  if (!sources || !sources.length) return '';
-  const items = sources.map((s) =>
-    `<div class="source-item">📄 ${escapeHtml(s.title || 'документ')} <span style="opacity:.6">· ${(s.score || 0).toFixed(2)}</span></div>`
-  ).join('');
-  return `<div class="sources"><details><summary>📚 Использовано ${sources.length} фрагмент${sources.length === 1 ? '' : 'ов'}</summary>${items}</details></div>`;
-}
 
 function offerLead(conversationId, fields) {
   const wrap = document.createElement('div');
