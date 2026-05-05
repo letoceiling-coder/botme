@@ -5,7 +5,7 @@ const $$ = (s) => Array.from(document.querySelectorAll(s));
 const fmt = (n) => Number(n || 0).toLocaleString('ru-RU');
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
 
-const PROVIDER_DOT = { claude: '#d97706', openai: '#10a37f', gemini: '#4285f4', ollama: '#a78bfa' };
+const PROVIDER_DOT = { claude: '#d97706', openai: '#10a37f', gemini: '#4285f4', ollama: '#a78bfa', openrouter: '#f97316' };
 
 // =============================================================
 // ID ассистента + state

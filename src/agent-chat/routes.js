@@ -1,7 +1,7 @@
 // Простой диалоговый агент (ChatGPT-стиль): история сообщений + выбор модели из MODELS.
 // POST /api/agent/chat  → JSON или SSE (?stream=1)
 import express from 'express';
-import { MODELS, callWithFallback } from '../llm.js';
+import { resolveModelConfig, callWithFallback } from '../llm.js';
 
 const router = express.Router();
 
@@ -28,7 +28,7 @@ router.post('/chat', async (req, res) => {
   const { model, messages, temperature, systemPrompt } = req.body || {};
   const stream = req.query.stream === '1' || req.query.stream === 'true';
 
-  if (!model || !MODELS.some((m) => m.id === model)) {
+  if (!model || !resolveModelConfig(model)) {
     return res.status(400).json({ error: 'Укажите валидный model (см. GET /api/models)' });
   }
 

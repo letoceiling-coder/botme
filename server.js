@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
-import { MODELS, callWithFallback, recordUsage, readGeneratorStats, resetGeneratorStats } from './src/llm.js';
+import { getModelsMerged, callWithFallback, recordUsage, readGeneratorStats, resetGeneratorStats } from './src/llm.js';
 import assistantsRouter from './src/assistants/routes.js';
 import publicApiRouter from './src/public-api/routes.js';
 import agentChatRouter from './src/agent-chat/routes.js';
@@ -462,8 +462,19 @@ app.use('/preview/:id', async (req, res, next) => {
   express.static(dir, { index: 'index.html' })(req, res, next);
 });
 
-app.get('/api/models', (_req, res) => {
-  res.json(MODELS.map((m) => ({ id: m.id, label: m.label, provider: m.provider })));
+app.get('/api/models', async (_req, res) => {
+  try {
+    const list = await getModelsMerged();
+    res.json(list.map((m) => ({
+      id: m.id,
+      label: m.label,
+      provider: m.provider,
+      ...(m.openrouterFree ? { free: true } : {}),
+    })));
+  } catch (e) {
+    console.error('[api/models]', e);
+    res.status(500).json({ error: e?.message || String(e) });
+  }
 });
 
 app.get('/api/projects', async (_req, res) => {
@@ -657,7 +668,13 @@ app.post('/api/improve-prompt', async (req, res) => {
 // =============================================================
 app.get('/api/stats', async (_req, res) => {
   const stats = await readGeneratorStats();
-  const labels = Object.fromEntries(MODELS.map((m) => [m.id, m.label]));
+  let list = [];
+  try {
+    list = await getModelsMerged();
+  } catch {
+    list = [];
+  }
+  const labels = Object.fromEntries(list.map((m) => [m.id, m.label]));
   res.json({ ...stats, modelLabels: labels });
 });
 

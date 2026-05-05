@@ -103,8 +103,23 @@ async function loadModels() {
   for (const m of models) {
     (groups[m.provider] ||= []).push(m);
   }
-  const labels = { ollama: 'Ollama (локально, qwen)', openai: 'OpenAI', claude: 'Anthropic Claude', gemini: 'Google Gemini' };
-  for (const provider of Object.keys(groups)) {
+  const labels = {
+    ollama: 'Ollama (локально, qwen)',
+    openai: 'OpenAI',
+    claude: 'Anthropic Claude',
+    gemini: 'Google Gemini',
+    openrouter: 'OpenRouter (tools)',
+  };
+  const order = ['ollama', 'openai', 'claude', 'gemini', 'openrouter'];
+  const keys = Object.keys(groups).sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  for (const provider of keys) {
     const og = document.createElement('optgroup');
     og.label = labels[provider] || provider;
     for (const m of groups[provider]) {
@@ -127,6 +142,11 @@ function updateModelHint() {
   const id = els.modelSelect.value;
   const m = state.models.find((x) => x.id === id);
   if (!m) return;
+  if (m.provider === 'openrouter') {
+    const freeNote = m.free ? '🆓 Бесплатная по тарифам OpenRouter · ' : '';
+    els.modelHint.textContent = `${freeNote}Единый API OpenRouter, модель с поддержкой tools. Подходит для экспериментов и альтернативных провайдеров.`;
+    return;
+  }
   const tips = {
     'ollama:qwen2.5-coder:7b': '⚠ Маленькая модель — для простых страниц и прототипов. Для премиум-лендингов выбирай Claude Sonnet 4.6 или GPT-5.4.',
     'ollama:llama3:latest':    '⚠ Общая модель, не лучший выбор для UI. Лучше Claude/GPT для дизайна.',
@@ -154,6 +174,7 @@ const PROVIDER_DOT = {
   openai: '#10a37f',  // зелёный
   gemini: '#4285f4',  // синий Google
   ollama: '#a78bfa',  // фиолетовый
+  openrouter: '#f97316', // оранжевый OpenRouter
 };
 
 function modelShortName(modelId) {

@@ -1,4 +1,4 @@
-// Унифицированный роутер LLM-провайдеров: OpenAI, Claude, Gemini, Ollama.
+// Унифицированный роутер LLM: OpenAI, Claude, Gemini, Ollama, OpenRouter.
 // Используется и в /api/generate (генератор сайтов), и в модуле ассистентов.
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -28,6 +28,18 @@ export const anthropic = process.env.ANTHROPIC_API_KEY
 
 export const gemini = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
+
+/** OpenAI-совместимый API: https://openrouter.ai/docs */
+export const openrouter = process.env.OPENROUTER_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+      defaultHeaders: {
+        'HTTP-Referer': process.env.OPENROUTER_HTTP_REFERER || process.env.PUBLIC_SITE_URL || 'https://botme.neeklo.ru',
+        'X-Title': process.env.OPENROUTER_APP_TITLE || 'Botme',
+      },
+    })
   : null;
 
 // =============================================================
@@ -73,10 +85,97 @@ export const FALLBACK_PRIORITY = [
 ];
 
 // =============================================================
+// OpenRouter: модели с supported_parameters.tools (список с API, кэш)
+// =============================================================
+const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const OPENROUTER_CACHE_MS = 60 * 60 * 1000;
+let openRouterCatalogCache = { ts: 0, entries: [] };
+
+function isOpenRouterFreePricing(pricing) {
+  if (!pricing) return false;
+  const pi = Number(pricing.prompt ?? pricing.input ?? 0);
+  const po = Number(pricing.completion ?? pricing.output ?? 0);
+  return pi === 0 && po === 0;
+}
+
+/** Короткое русское пояснение по описанию/id (как у статического каталога). */
+function ruHintOpenRouter(m) {
+  const blob = `${m.id || ''} ${m.name || ''} ${m.description || ''}`.toLowerCase();
+  if (/nemotron|owl|agentic|multi-agent|tool calling|tool-calling|enterprise agent/i.test(blob)) {
+    return 'агенты и tool-calling';
+  }
+  if (/reasoning|chain-of-thought|\br1\b|think/i.test(blob)) return 'рассуждения, сложная логика';
+  if (/code|coder|granite|devstral|starcoder|qwen.*coder|codex/i.test(blob)) return 'код и UI';
+  if (/flash|lite|nano|tiny|mini|small|8b\b|7b\b|3b\b/i.test(blob)) return 'быстрая / экономичная';
+  if (/opus|405|400b|120b|ultra|heavy|grok 4|medium 3|sonnet|large/i.test(blob)) return 'тяжёлые задачи, длинный контекст';
+  if (/multimodal|vision|image|omni|pixtral|audio|video/i.test(blob)) return 'мультимодальность';
+  if (/finance|legal|medical|enterprise/i.test(blob)) return 'отраслевые сценарии';
+  return 'универсальный чат с tools';
+}
+
+export async function fetchOpenRouterToolModelsCached() {
+  if (!openrouter) return [];
+  const now = Date.now();
+  if (openRouterCatalogCache.entries.length && now - openRouterCatalogCache.ts < OPENROUTER_CACHE_MS) {
+    return openRouterCatalogCache.entries;
+  }
+  const res = await fetch(OPENROUTER_MODELS_URL);
+  if (!res.ok) throw new Error(`OpenRouter models HTTP ${res.status}`);
+  const data = await res.json();
+  const list = data.data || [];
+  const toolsModels = list.filter(
+    (m) => Array.isArray(m.supported_parameters) && m.supported_parameters.includes('tools'),
+  );
+  const entries = toolsModels.map((m) => {
+    const slug = m.id;
+    const free = isOpenRouterFreePricing(m.pricing);
+    const shortName = String(m.name || slug).replace(/\s*\(free\)\s*$/i, '').trim();
+    const hint = ruHintOpenRouter(m);
+    const label = `${shortName} — ${hint}${free ? ' · 🆓 бесплатно' : ''}`;
+    return {
+      id: `openrouter:${slug}`,
+      label,
+      provider: 'openrouter',
+      model: slug,
+      openrouterFree: free,
+    };
+  });
+  entries.sort((a, b) => {
+    if (a.openrouterFree !== b.openrouterFree) return a.openrouterFree ? -1 : 1;
+    return a.label.localeCompare(b.label, 'ru');
+  });
+  openRouterCatalogCache = { ts: now, entries };
+  return entries;
+}
+
+/** Статический каталог + OpenRouter (если задан OPENROUTER_API_KEY). */
+export async function getModelsMerged() {
+  const base = MODELS.map((m) => ({ ...m, openrouterFree: false }));
+  if (!openrouter) return base;
+  try {
+    const extra = await fetchOpenRouterToolModelsCached();
+    return [...base, ...extra];
+  } catch (e) {
+    console.warn('[openrouter] каталог моделей:', e?.message || e);
+    return base;
+  }
+}
+
+/** Разрешить id модели (статическая или openrouter:vendor/model). */
+export function resolveModelConfig(modelId) {
+  const hit = MODELS.find((m) => m.id === modelId);
+  if (hit) return hit;
+  if (!modelId || typeof modelId !== 'string' || !modelId.startsWith('openrouter:')) return null;
+  const slug = modelId.slice('openrouter:'.length).trim();
+  if (!slug) return null;
+  return { id: modelId, label: slug, provider: 'openrouter', model: slug };
+}
+
+// =============================================================
 // Один запрос к модели → { text, usage: {input, output, total} }
 // =============================================================
 export async function callModel(modelId, messages, { maxTokens, temperature = 0.4, stream = false, onDelta } = {}) {
-  const cfg = MODELS.find((m) => m.id === modelId);
+  const cfg = resolveModelConfig(modelId);
   if (!cfg) throw new Error(`Неизвестная модель: ${modelId}`);
 
   const sys = messages.find((m) => m.role === 'system')?.content || '';
@@ -193,13 +292,43 @@ export async function callModel(modelId, messages, { maxTokens, temperature = 0.
     };
   }
 
+  if (cfg.provider === 'openrouter') {
+    if (!openrouter) throw new Error('OPENROUTER_API_KEY не настроен');
+    const cap = Math.min(maxTokens || 16384, 128000);
+    const params = {
+      model: cfg.model,
+      messages: [{ role: 'system', content: sys }, ...dialog],
+      max_tokens: cap,
+      temperature,
+    };
+
+    if (stream && onDelta) {
+      const s = await openrouter.chat.completions.create({ ...params, stream: true });
+      let full = '';
+      let usage = { input: 0, output: 0, total: 0 };
+      for await (const part of s) {
+        const d = part.choices?.[0]?.delta?.content || '';
+        if (d) { full += d; onDelta(d); }
+        const u = part.usage;
+        if (u) usage = { input: u.prompt_tokens || 0, output: u.completion_tokens || 0, total: u.total_tokens || 0 };
+      }
+      return { text: full, usage };
+    }
+    const r = await openrouter.chat.completions.create(params);
+    const u = r.usage || {};
+    return {
+      text: r.choices?.[0]?.message?.content || '',
+      usage: { input: u.prompt_tokens || 0, output: u.completion_tokens || 0, total: u.total_tokens || 0 },
+    };
+  }
+
   throw new Error(`Неизвестный провайдер: ${cfg.provider}`);
 }
 
 export function buildFallbackChain(primary) {
   const chain = [primary];
   for (const id of FALLBACK_PRIORITY) {
-    if (id !== primary && MODELS.some((m) => m.id === id)) chain.push(id);
+    if (id !== primary && resolveModelConfig(id)) chain.push(id);
   }
   return chain;
 }
