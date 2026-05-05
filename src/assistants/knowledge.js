@@ -37,7 +37,52 @@ export async function parseDocxFile(filePath) {
   return cleanWhitespace(r.value || '');
 }
 
+// Минимальная длина текста, чтобы считать парсинг успешным.
+// Если меньше — пробуем дополнительные стратегии (мета+JSON-LD, затем JS-rendering proxy).
+const MIN_USEFUL_TEXT_LEN = 300;
+
 export async function fetchAndParseUrl(url) {
+  // Шаг 1: статический HTML
+  const html = await downloadHtml(url);
+  let { title, content } = extractMainContent(html, url);
+
+  // Шаг 2: если по основному body мало текста (SPA, лендинг с пустым root)
+  // — попробуем дотянуть из мета-тегов и JSON-LD.
+  if (content.length < MIN_USEFUL_TEXT_LEN) {
+    const meta = extractMetaAndJsonLd(html);
+    const merged = [content, meta.text].filter(Boolean).join('\n\n').trim();
+    if (merged.length > content.length) {
+      content = merged;
+      if (!title && meta.title) title = meta.title;
+    }
+  }
+
+  // Шаг 3: всё ещё мало — пробуем публичный JS-rendering прокси r.jina.ai.
+  // Бесплатно, без ключа, отдаёт чистый markdown отрендеренной страницы.
+  if (content.length < MIN_USEFUL_TEXT_LEN) {
+    try {
+      const rendered = await fetchViaJinaReader(url);
+      if (rendered && rendered.length > content.length) {
+        content = rendered;
+      }
+    } catch (e) {
+      // мягкий fallback — если jina недоступна, оставляем что есть
+    }
+  }
+
+  if (!title) title = url;
+
+  if (content.length < 50) {
+    throw new Error(
+      'Не удалось извлечь полезный текст со страницы. Возможно, это SPA с пустым HTML, ' +
+      'либо доступ закрыт авторизацией. Попробуйте загрузить документ файлом или вставить текст вручную.',
+    );
+  }
+
+  return { title, content };
+}
+
+async function downloadHtml(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20_000);
   try {
@@ -46,12 +91,12 @@ export async function fetchAndParseUrl(url) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; BotmeBot/1.0; +https://botme.neeklo.ru)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ru,en;q=0.9',
       },
       redirect: 'follow',
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const html = await resp.text();
-    return extractMainContent(html, url);
+    return await resp.text();
   } finally {
     clearTimeout(t);
   }
@@ -78,8 +123,113 @@ function extractMainContent(html, baseUrl) {
     text  = cleanWhitespace($('body').text() || '');
   }
 
-  if (!title) title = baseUrl;
   return { title, content: text };
+}
+
+// Извлекаем то, что доступно даже на SPA: title, description, keywords,
+// open graph, twitter, JSON-LD (schema.org), все h1-h3 из исходного HTML.
+function extractMetaAndJsonLd(html) {
+  const $ = cheerio.load(html);
+  const lines = [];
+  const title = ($('title').first().text() || '').trim();
+
+  const desc = ($('meta[name="description"]').attr('content') || '').trim();
+  const keywords = ($('meta[name="keywords"]').attr('content') || '').trim();
+  const ogTitle = ($('meta[property="og:title"]').attr('content') || '').trim();
+  const ogDesc  = ($('meta[property="og:description"]').attr('content') || '').trim();
+  const ogSite  = ($('meta[property="og:site_name"]').attr('content') || '').trim();
+  const twTitle = ($('meta[name="twitter:title"]').attr('content') || '').trim();
+  const twDesc  = ($('meta[name="twitter:description"]').attr('content') || '').trim();
+
+  if (title) lines.push(`Заголовок: ${title}`);
+  if (ogTitle && ogTitle !== title) lines.push(`OG Title: ${ogTitle}`);
+  if (ogSite) lines.push(`Сайт: ${ogSite}`);
+  if (desc) lines.push(`Описание: ${desc}`);
+  if (ogDesc && ogDesc !== desc) lines.push(`OG Описание: ${ogDesc}`);
+  if (twDesc && twDesc !== desc && twDesc !== ogDesc) lines.push(`Twitter: ${twDesc}`);
+  if (keywords) lines.push(`Ключевые слова: ${keywords}`);
+
+  // h1..h3 (на SPA редко есть, но если в SSR-prerender — будут)
+  const heads = [];
+  $('h1, h2, h3').each((_, el) => {
+    const t = $(el).text().trim();
+    if (t && t.length < 200) heads.push(t);
+  });
+  if (heads.length) lines.push('Заголовки страницы: ' + heads.slice(0, 20).join(' • '));
+
+  // JSON-LD schema.org
+  const jsonLdBlocks = [];
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const raw = $(el).contents().text();
+      const data = JSON.parse(raw);
+      jsonLdBlocks.push(...flattenJsonLd(data));
+    } catch { /* пропускаем битый JSON */ }
+  });
+  for (const ld of jsonLdBlocks) {
+    const block = jsonLdToText(ld);
+    if (block) lines.push(block);
+  }
+
+  return { title, text: lines.join('\n\n').trim() };
+}
+
+function flattenJsonLd(data) {
+  if (!data) return [];
+  if (Array.isArray(data)) return data.flatMap(flattenJsonLd);
+  if (data['@graph'] && Array.isArray(data['@graph'])) return data['@graph'].flatMap(flattenJsonLd);
+  return [data];
+}
+
+function jsonLdToText(o) {
+  if (!o || typeof o !== 'object') return '';
+  const lines = [];
+  const t = o['@type'] || 'Item';
+  lines.push(`[${Array.isArray(t) ? t.join('/') : t}]`);
+  for (const [k, v] of Object.entries(o)) {
+    if (k.startsWith('@')) continue;
+    if (v == null) continue;
+    if (typeof v === 'string' || typeof v === 'number') {
+      lines.push(`${humanKey(k)}: ${v}`);
+    } else if (Array.isArray(v)) {
+      const flat = v.filter((x) => typeof x === 'string' || typeof x === 'number');
+      if (flat.length) lines.push(`${humanKey(k)}: ${flat.join(', ')}`);
+    } else if (typeof v === 'object' && (v.name || v['@id'])) {
+      lines.push(`${humanKey(k)}: ${v.name || v['@id']}`);
+    }
+  }
+  return lines.length > 1 ? lines.join('\n') : '';
+}
+
+function humanKey(k) {
+  return k
+    .replace(/^@/, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+// Публичный read-mode прокси с JS-рендерингом. Бесплатно, без ключа.
+// Возвращает чистый markdown отрендеренной страницы.
+async function fetchViaJinaReader(url) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 25_000);
+  try {
+    const proxied = `https://r.jina.ai/${url}`;
+    const resp = await fetch(proxied, {
+      signal: ctrl.signal,
+      headers: {
+        'Accept': 'text/plain',
+        'User-Agent': 'Mozilla/5.0 (compatible; BotmeBot/1.0)',
+      },
+      redirect: 'follow',
+    });
+    if (!resp.ok) return '';
+    const txt = await resp.text();
+    return cleanWhitespace(txt);
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 function cleanWhitespace(s) {
