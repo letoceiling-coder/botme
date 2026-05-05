@@ -17,6 +17,12 @@ import {
   generateApiToken, listAssistantTokens, revokeToken, deleteToken,
 } from '../public-api/auth.js';
 import { generateKnowledgeBase, enrichDocument } from './kb-generator.js';
+import {
+  insertAssistantLead,
+  getNotificationSettingsPublic,
+  saveNotificationSettings,
+  sendTestNotifications,
+} from '../notifications/service.js';
 
 const router = express.Router();
 
@@ -91,10 +97,6 @@ const sql = {
 
   listLeads: db.prepare(`SELECT * FROM leads WHERE assistant_id = ? ORDER BY created_at DESC`),
   deleteLead: db.prepare(`DELETE FROM leads WHERE id = ? AND assistant_id = ?`),
-  insertLead: db.prepare(`
-    INSERT INTO leads (id, assistant_id, conversation_id, name, email, phone, message, meta_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
 
   statsByDay:    db.prepare(`SELECT day, SUM(calls) AS calls, SUM(input) AS input, SUM(output) AS output, SUM(total) AS total FROM assistant_stats WHERE assistant_id = ? GROUP BY day ORDER BY day DESC LIMIT 30`),
   statsByModel:  db.prepare(`SELECT model, SUM(calls) AS calls, SUM(input) AS input, SUM(output) AS output, SUM(total) AS total FROM assistant_stats WHERE assistant_id = ? GROUP BY model ORDER BY total DESC`),
@@ -350,9 +352,11 @@ router.post('/:id/documents/generate', async (req, res) => {
       return res.status(400).json({ error: 'description обязателен' });
     }
 
-    // Длительная операция (до 60 сек) — поэтому ставим увеличенный timeout на ответ
-    req.setTimeout(120_000);
-    res.setTimeout?.(120_000);
+    // Долгий LLM-вызов (иногда 2–3+ мин на OpenRouter/бесплатных моделях).
+    // nginx для /api/assistants/ ждёт до 300s — здесь не должно быть меньше, иначе сокет
+    // закроется раньше ответа → nginx: upstream prematurely closed connection → 502.
+    req.setTimeout(300_000);
+    res.setTimeout?.(300_000);
 
     const result = await generateKnowledgeBase({
       description, tone, targetCount, modelId,
@@ -400,8 +404,8 @@ router.post('/:id/documents/:docId/enrich', async (req, res) => {
     if (!doc || !doc.content) return res.status(404).json({ error: 'not found' });
     const { hint, modelId, replace } = req.body || {};
 
-    req.setTimeout(120_000);
-    res.setTimeout?.(120_000);
+    req.setTimeout(300_000);
+    res.setTimeout?.(300_000);
 
     const result = await enrichDocument({
       rawContent: doc.content, hint, modelId,
@@ -555,17 +559,53 @@ router.post('/:id/leads', (req, res) => {
   if (!name && !email && !phone) {
     return res.status(400).json({ error: 'нужно указать хотя бы имя, email или телефон' });
   }
-  const id = randomUUID();
-  sql.insertLead.run(
-    id, req.params.id, conversationId || null,
-    (name || '').slice(0, 200) || null,
-    (email || '').slice(0, 200) || null,
-    (phone || '').slice(0, 80) || null,
-    (message || '').slice(0, 4000) || null,
-    meta ? JSON.stringify(meta) : null,
-    now(),
-  );
+  const id = insertAssistantLead({
+    assistantId: req.params.id,
+    conversationId,
+    name,
+    email,
+    phone,
+    message,
+    meta,
+    limits: 'admin',
+  });
   res.json({ ok: true, id });
+});
+
+// =============================================================
+// Уведомления о лидах (email / Telegram / VK), изолированно по ассистенту
+// =============================================================
+router.get('/:id/notifications', (req, res) => {
+  if (!sql.getAssistant.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try {
+    res.json(getNotificationSettingsPublic(req.params.id));
+  } catch (e) {
+    console.error('[notifications/get]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/:id/notifications', (req, res) => {
+  if (!sql.getAssistant.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try {
+    const saved = saveNotificationSettings(req.params.id, req.body || {});
+    res.json(saved);
+  } catch (e) {
+    console.error('[notifications/put]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/:id/notifications/test', async (req, res) => {
+  if (!sql.getAssistant.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  try {
+    const channels = req.body?.channels;
+    const results = await sendTestNotifications(req.params.id, { channels });
+    res.json({ ok: true, results });
+  } catch (e) {
+    console.error('[notifications/test]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 router.delete('/:id/leads/:leadId', (req, res) => {

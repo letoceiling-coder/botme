@@ -1,10 +1,10 @@
 // Публичный API под bearer-токенами: /api/v1/*
 // Используется виджетом (https://botme.neeklo.ru/widget*) и сторонними клиентами.
 import express from 'express';
-import { randomUUID } from 'node:crypto';
-import { db, now } from '../db.js';
+import { db } from '../db.js';
 import { askAssistant } from '../assistants/chat.js';
 import { requireApiToken } from './auth.js';
+import { insertAssistantLead } from '../notifications/service.js';
 
 const router = express.Router();
 
@@ -26,10 +26,6 @@ router.use((req, res, next) => {
 // =============================================================
 const sql = {
   getAssistant: db.prepare(`SELECT id, name, description, greeting, theme_json, lead_config_json, model FROM assistants WHERE id = ?`),
-  insertLead: db.prepare(`
-    INSERT INTO leads (id, assistant_id, conversation_id, name, email, phone, message, meta_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
 };
 
 function safeJson(s, fallback = null) { try { return s ? JSON.parse(s) : fallback; } catch { return fallback; } }
@@ -146,22 +142,21 @@ router.post('/leads', requireApiToken(), (req, res) => {
   if (!name && !email && !phone) {
     return res.status(400).json({ error: 'bad_request', message: 'нужно хотя бы одно поле: name, email или phone' });
   }
-  const id = randomUUID();
-  const meta = {
-    url: req.headers.referer || req.headers.origin || null,
-    ua:  req.headers['user-agent'] || null,
-    ip:  req.ip || req.connection?.remoteAddress || null,
-    source: 'api',
-  };
-  sql.insertLead.run(
-    id, req.apiToken.assistantId, conversationId || null,
-    (name || '').slice(0, 200),
-    (email || '').slice(0, 200),
-    (phone || '').slice(0, 50),
-    (message || '').slice(0, 2000),
-    JSON.stringify(meta),
-    now(),
-  );
+  const id = insertAssistantLead({
+    assistantId: req.apiToken.assistantId,
+    conversationId,
+    name,
+    email,
+    phone,
+    message,
+    meta: {
+      url: req.headers.referer || req.headers.origin || null,
+      ua:  req.headers['user-agent'] || null,
+      ip:  req.ip || req.connection?.remoteAddress || null,
+      source: 'api',
+    },
+    limits: 'public',
+  });
   res.json({ id, ok: true });
 });
 

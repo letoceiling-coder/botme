@@ -28,7 +28,7 @@ botme/
 │
 ├── src/
 │   ├── llm.js                    — единый роутер OpenAI/Claude/Gemini/Ollama + статистика
-│   ├── db.js                     — better-sqlite3 + миграции (8 таблиц)
+│   ├── db.js                     — better-sqlite3 + миграции (assistants, RAG, лиды, уведомления)
 │   ├── assistants/
 │   │   ├── routes.js             — /api/assistants/* (админка)
 │   │   ├── knowledge.js          — парсинг (txt/url/pdf/docx/xlsx) + чанкинг 600 токенов
@@ -36,6 +36,13 @@ botme/
 │   │   ├── rag.js                — in-memory cosine similarity + LRU кеш
 │   │   ├── chat.js               — askAssistant() + лид-триггеры + SSE
 │   │   └── kb-generator.js       — AI-агент создаёт базу знаний по описанию бизнеса
+│   ├── notifications/
+│   │   ├── service.js            — лиды → каналы (email / Telegram / VK), лог доставок
+│   │   ├── repo.js               — SQLite: настройки и журнал
+│   │   ├── system-smtp.js        — общий SMTP из .env (SMTP_*)
+│   │   ├── email-provider.js     — nodemailer
+│   │   ├── telegram-provider.js  — Bot API
+│   │   └── vk-provider.js        — VK messages.send
 │   └── public-api/
 │       ├── auth.js               — ast_<32hex>, SHA-256, rate-limit, CORS
 │       └── routes.js             — /api/v1/chat (SSE) + /api/v1/leads + /api/v1/assistant
@@ -94,7 +101,9 @@ npm start                  # http://localhost:3001
 - `POST /api/assistants/:id/chat[?stream=1]` — тест-чат (SSE опционально)
 - `GET /api/assistants/:id/conversations[/:cid]`
 - `GET|POST /api/assistants/:id/tokens`, `POST .../revoke`, `DELETE .../:tid`
-- `GET /api/assistants/:id/leads[.csv]`, `DELETE .../:leadId`
+- `GET /api/assistants/:id/leads[.csv]`, `POST .../leads`, `DELETE .../:leadId`
+- **`GET|PUT /api/assistants/:id/notifications`** — уведомления о лидах (настройки только этого ассистента)
+- **`POST /api/assistants/:id/notifications/test`** — проверка каналов (опц. `{ "channels": ["email","telegram","vk"] }`)
 - `GET /api/assistants/:id/stats`
 
 ### Публичный API (для виджета и сторонних приложений)
@@ -103,6 +112,82 @@ Bearer-аутентификация: `Authorization: Bearer ast_<32hex>`. CORS=*
 - `POST /api/v1/chat[?stream=1]` `{ message, sessionId?, conversationId? }` — RAG + SSE
 - `POST /api/v1/leads` `{ conversationId, name?, phone?, email?, ... }`
 - `GET  /api/v1/health`
+
+## Уведомления о лидах
+
+Каждый ассистент настраивает свои каналы на вкладке **«Уведомления»** в карточке ассистента. При создании лида через **`POST /api/v1/leads`** или **`POST /api/assistants/:id/leads`** приложение ставит отправку в фон (`setImmediate`): ошибка одного канала не отменяет остальные; результат пишется в таблицу **`notification_deliveries`**.
+
+### Общий SMTP на сервере (например botme.neeklo.ru)
+
+В `.env` на сервере можно задать один SMTP для всего инстанса:
+
+| Переменная | Назначение |
+|------------|------------|
+| `SMTP_HOST` | Хост SMTP (обязательно вместе с `SMTP_FROM`) |
+| `SMTP_PORT` | Порт, по умолчанию `587` |
+| `SMTP_SECURE` | `1` или `true` — implicit TLS (часто порт 465) |
+| `SMTP_USER` / `SMTP_PASS` | Авторизация, если нужна |
+| `SMTP_FROM` | Адрес отправителя (обязательно вместе с `SMTP_HOST`) |
+| `SMTP_TLS_REJECT_UNAUTHORIZED` | `0` — не проверять сертификат (только осознанно) |
+
+Если **`SMTP_HOST`** и **`SMTP_FROM`** заданы, в админке достаточно включить email и указать **адрес получателя** (куда слать письмо о лиде). Свой SMTP в форме ассистента в этом случае можно не заполнять.
+
+Если общий SMTP **не** задан — у каждого ассистента заполняются поля своего SMTP в админке (хост, порт, логин/пароль, From).
+
+**Где взять SMTP:** у почтового провайдера (Google Workspace, Яндекс 360, Mail.ru для бизнеса, SendPulse, UniSender и т.д.) обычно есть раздел «SMTP» — хост, порт 587 (STARTTLS) или 465 (SSL), логин и пароль приложения.
+
+### Telegram
+
+1. В Telegram напишите [@BotFather](https://t.me/BotFather), команда `/newbot`, получите **токен** бота.
+2. Начните чат с ботом (кнопка Start). Чтобы узнать **chat_id** для личного чата: напишите [@userinfobot](https://t.me/userinfobot) или откройте `https://api.telegram.org/bot<TOKEN>/getUpdates` после сообщения боту — в JSON будет `chat.id`. Для группы добавьте бота в группу и возьмите id из `getUpdates` (часто отрицательный).
+
+В настройках ассистента включите Telegram, укажите `chat_id` и токен бота.
+
+### VK
+
+Используется метод [`messages.send`](https://dev.vk.com/method/messages.send): нужны **числовой user_id** получателя и **access_token** пользователя с правом отправки сообщений (в продакшене у VK жёсткие ограничения по типам токенов и доступам — проверьте актуальную политику VK для своего сценария).
+
+Для разработки token можно получить через инструменты VK для standalone-приложений; user_id — из профиля или сервисов по ссылке на профиль.
+
+### API (примеры)
+
+```http
+GET /api/assistants/<assistant_id>/notifications
+```
+
+Ответ содержит флаг **`system_smtp_available`** и настройки без секретов (`secrets.*_set`).
+
+```http
+PUT /api/assistants/<assistant_id>/notifications
+Content-Type: application/json
+
+{
+  "email_enabled": true,
+  "email_to": "manager@example.com",
+  "telegram_enabled": true,
+  "telegram_chat_id": "123456789",
+  "telegram_bot_token": "123456:ABC..."
+}
+```
+
+Поля паролей/токенов можно не отправлять — тогда сохраняются предыдущие значения. Пустая строка очищает секрет.
+
+```http
+POST /api/assistants/<assistant_id>/notifications/test
+Content-Type: application/json
+
+{}
+```
+
+Отправляет тест во все включённые каналы.
+
+### Тесты
+
+```bash
+npm test
+```
+
+(`node --test`: формат текста лида, определение общего SMTP из env.)
 
 ## Виджет
 
@@ -120,6 +205,7 @@ Bearer-аутентификация: `Authorization: Bearer ast_<32hex>`. CORS=*
 - **Парсеры:** `pdf-parse`, `mammoth` (DOCX), `xlsx` (Excel), `cheerio` + `@mozilla/readability` (URL)
 - **Токены:** `gpt-tokenizer` (чанкинг)
 - **Загрузки:** `multer`
+- **Уведомления:** `nodemailer` (SMTP), Bot API Telegram и VK API через встроенный `fetch`
 - **Frontend:** vanilla JS + Tailwind CDN, без сборки
 
 ## Безопасность

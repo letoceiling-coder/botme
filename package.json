@@ -6,7 +6,8 @@
   "main": "server-entry.mjs",
   "scripts": {
     "start": "node server-entry.mjs",
-    "dev": "node --watch server-entry.mjs"
+    "dev": "node --watch server-entry.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -21,6 +22,7 @@
     "jsdom": "^29.1.1",
     "mammoth": "^1.12.0",
     "multer": "^2.1.1",
+    "nodemailer": "^6.10.0",
     "openai": "^4.77.0",
     "pdf-parse": "^2.4.5",
     "xlsx": "^0.18.5"

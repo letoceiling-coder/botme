@@ -134,6 +134,39 @@ db.exec(`
     total           INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (assistant_id, day, model, source)
   );
+
+  CREATE TABLE IF NOT EXISTS assistant_notification_settings (
+    assistant_id          TEXT PRIMARY KEY,
+    email_enabled         INTEGER NOT NULL DEFAULT 0,
+    email_to              TEXT,
+    email_smtp_host       TEXT,
+    email_smtp_port       INTEGER,
+    email_smtp_secure     INTEGER NOT NULL DEFAULT 0,
+    email_smtp_user       TEXT,
+    email_smtp_pass       TEXT,
+    email_from_override   TEXT,
+    telegram_enabled      INTEGER NOT NULL DEFAULT 0,
+    telegram_chat_id      TEXT,
+    telegram_bot_token    TEXT,
+    vk_enabled            INTEGER NOT NULL DEFAULT 0,
+    vk_user_id            TEXT,
+    vk_access_token       TEXT,
+    updated_at            INTEGER NOT NULL,
+    FOREIGN KEY (assistant_id) REFERENCES assistants(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id             TEXT PRIMARY KEY,
+    lead_id        TEXT NOT NULL,
+    assistant_id   TEXT NOT NULL,
+    channel        TEXT NOT NULL,
+    ok             INTEGER NOT NULL,
+    error          TEXT,
+    created_at     INTEGER NOT NULL,
+    FOREIGN KEY (assistant_id) REFERENCES assistants(id) ON DELETE CASCADE,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_notify_deliver_lead ON notification_deliveries(lead_id);
 `);
 
 // =============================================================

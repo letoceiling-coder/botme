@@ -35,6 +35,7 @@ function activateTab(name) {
   if (name === 'api')           loadTokens();
   if (name === 'widget')        initWidgetTab();
   if (name === 'leads')         loadLeads();
+  if (name === 'notifications') loadNotifications();
   if (name === 'conversations') loadConversations();
 }
 
@@ -356,7 +357,7 @@ function renderInlineLeadForm(fields, conversationId) {
   wrap.querySelector('.lead-inline-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const payload = { conversationId };
+    const payload = { conversationId, meta: { source: 'admin' } };
     for (const [k, v] of fd.entries()) if (v) payload[k] = v;
     const status = wrap.querySelector('.lead-inline-status');
     status.textContent = 'Сохраняем…';
@@ -687,6 +688,101 @@ async function loadLeads() {
   $('#exportLeadsBtn').href = `/api/assistants/${ASSISTANT_ID}/leads.csv`;
 }
 $('#refreshLeads').addEventListener('click', loadLeads);
+
+// =============================================================
+// Уведомления о лидах
+// =============================================================
+async function loadNotifications() {
+  const data = await fetch(`/api/assistants/${ASSISTANT_ID}/notifications`).then((r) => {
+    if (!r.ok) throw new Error('Не удалось загрузить настройки');
+    return r.json();
+  });
+
+  const banner = $('#notifySysBanner');
+  banner.classList.remove('hidden');
+  if (data.system_smtp_available) {
+    banner.className = 'text-xs px-3 py-2 rounded-lg border border-ok/40 bg-panel2 text-ok/90';
+    banner.textContent = 'На сервере задан общий SMTP (SMTP_HOST / SMTP_FROM в .env). Для email достаточно включить канал и указать адрес получателя.';
+    $('#nEmailCustomWrap').classList.add('hidden');
+  } else {
+    banner.className = 'text-xs px-3 py-2 rounded-lg border border-border bg-panel2 text-muted';
+    banner.textContent = 'Общий SMTP на сервере не настроен — укажите свой SMTP в блоке ниже или добавьте переменные SMTP_* в .env на сервере (см. README «Уведомления»).';
+    $('#nEmailCustomWrap').classList.remove('hidden');
+  }
+
+  $('#nEmailEn').checked = !!data.email_enabled;
+  $('#nEmailTo').value = data.email_to || '';
+  $('#nSmtpHost').value = data.email_smtp_host || '';
+  $('#nSmtpPort').value = data.email_smtp_port != null ? String(data.email_smtp_port) : '';
+  $('#nSmtpSecure').checked = !!data.email_smtp_secure;
+  $('#nSmtpUser').value = data.email_smtp_user || '';
+  $('#nSmtpFrom').value = data.email_from_override || '';
+  $('#nSmtpPass').value = '';
+
+  $('#nTgEn').checked = !!data.telegram_enabled;
+  $('#nTgChat').value = data.telegram_chat_id || '';
+  $('#nTgToken').value = '';
+
+  $('#nVkEn').checked = !!data.vk_enabled;
+  $('#nVkUser').value = data.vk_user_id || '';
+  $('#nVkToken').value = '';
+
+  $('#notifyStatus').textContent = '';
+}
+
+$('#saveNotifyBtn').addEventListener('click', async () => {
+  $('#notifyStatus').textContent = 'Сохранение…';
+  const body = {
+    email_enabled: $('#nEmailEn').checked,
+    email_to: $('#nEmailTo').value.trim(),
+    email_smtp_host: $('#nSmtpHost').value.trim(),
+    email_smtp_port: $('#nSmtpPort').value.trim() ? Number($('#nSmtpPort').value) : null,
+    email_smtp_secure: $('#nSmtpSecure').checked,
+    email_smtp_user: $('#nSmtpUser').value.trim(),
+    email_from_override: $('#nSmtpFrom').value.trim(),
+    telegram_enabled: $('#nTgEn').checked,
+    telegram_chat_id: $('#nTgChat').value.trim(),
+    vk_enabled: $('#nVkEn').checked,
+    vk_user_id: $('#nVkUser').value.trim(),
+  };
+  if ($('#nSmtpPass').value) body.email_smtp_pass = $('#nSmtpPass').value;
+  if ($('#nTgToken').value) body.telegram_bot_token = $('#nTgToken').value;
+  if ($('#nVkToken').value) body.vk_access_token = $('#nVkToken').value;
+
+  try {
+    const r = await fetch(`/api/assistants/${ASSISTANT_ID}/notifications`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    $('#notifyStatus').innerHTML = '<span class="text-ok">Сохранено ✓</span>';
+    $('#nSmtpPass').value = '';
+    $('#nTgToken').value = '';
+    $('#nVkToken').value = '';
+    await loadNotifications();
+  } catch (e) {
+    $('#notifyStatus').innerHTML = `<span class="text-err">${escapeHtml(e.message)}</span>`;
+  }
+});
+
+$('#testNotifyBtn').addEventListener('click', async () => {
+  $('#notifyStatus').textContent = 'Отправка теста…';
+  try {
+    const r = await fetch(`/api/assistants/${ASSISTANT_ID}/notifications/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    const lines = (j.results || []).map((x) => `${x.channel}: ${x.ok ? 'ok' : x.error || 'fail'}`).join('; ');
+    $('#notifyStatus').innerHTML = `<span class="text-muted">${escapeHtml(lines || 'Нет включённых каналов')}</span>`;
+  } catch (e) {
+    $('#notifyStatus').innerHTML = `<span class="text-err">${escapeHtml(e.message)}</span>`;
+  }
+});
 
 function renderLeads(leads) {
   const el = $('#leadList');
