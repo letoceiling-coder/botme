@@ -145,9 +145,13 @@
           <div class="flex gap-2">
             <input id="urlInput" type="url" placeholder="https://example.com/article"
               class="flex-1 bg-panel border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50" />
-            <button id="addUrlBtn" class="text-sm px-3 py-2 rounded-lg bg-brand/20 border border-brand/40 hover:bg-brand/30">+</button>
+            <button id="addUrlBtn" class="text-sm px-3 py-2 rounded-lg bg-brand/20 border border-brand/40 hover:bg-brand/30" title="Загрузить одну страницу">+</button>
+            <button id="crawlSiteBtn" class="text-sm px-3 py-2 rounded-lg bg-brand2/20 border border-brand2/40 hover:bg-brand2/30 whitespace-nowrap" title="Обойти весь сайт по sitemap.xml">🌐 Весь сайт</button>
           </div>
-          <div class="text-xs text-muted mt-2">Автоматически извлечём основной контент через Mozilla Readability.</div>
+          <div class="text-xs text-muted mt-2">
+            <b>Одна страница</b> — рендерим JS через r.jina.ai + извлекаем мета и schema.org.<br/>
+            <b>Весь сайт</b> — обходим по sitemap.xml до 30 страниц и индексируем каждую.
+          </div>
         </div>
         <!-- Текст -->
         <div class="md:col-span-1">
@@ -356,6 +360,64 @@
       <div class="flex justify-end gap-2">
         <button id="cancelText" class="text-sm px-3 py-2 rounded-lg bg-panel2 border border-border">Отмена</button>
         <button id="saveText" class="text-sm px-4 py-2 rounded-lg bg-gradient-to-r from-brand to-brand2 text-white font-medium">Добавить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка краулера сайта -->
+<div id="crawlModal" class="modal-bg hidden">
+  <div class="modal-card" style="max-width:560px;">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="text-lg font-semibold">🌐 Обойти сайт целиком</div>
+        <div class="text-xs text-muted mt-0.5">Найдём sitemap.xml (или соберём ссылки с главной) и проиндексируем каждую страницу как отдельный документ.</div>
+      </div>
+      <button id="closeCrawl" class="w-8 h-8 rounded-md bg-panel2 border border-border hover:border-brand/50 text-lg leading-none">×</button>
+    </div>
+
+    <div id="crawlStep1" class="space-y-3">
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-muted mb-1">Адрес сайта</label>
+        <input id="crawlUrl" type="url" placeholder="https://example.com/"
+          class="w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50" />
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs uppercase tracking-wider text-muted mb-1">Лимит страниц</label>
+          <input id="crawlLimit" type="number" min="1" max="100" value="30"
+            class="w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wider text-muted mb-1">Поддомены</label>
+          <select id="crawlSameOrigin" class="w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50">
+            <option value="true" selected>Только этот домен</option>
+            <option value="false">Включая поддомены и внешние ссылки</option>
+          </select>
+        </div>
+      </div>
+      <div class="text-xs text-muted">
+        Каждая страница будет добавлена как отдельный документ. Индексация в фоне через OpenAI embeddings.
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button id="cancelCrawl" class="text-sm px-3 py-2 rounded-lg bg-panel2 border border-border">Отмена</button>
+        <button id="runCrawl" class="text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-brand to-brand2 text-white font-medium">Обойти сайт</button>
+      </div>
+    </div>
+
+    <div id="crawlStep2" class="hidden text-center py-8">
+      <div class="inline-flex flex-col items-center gap-3">
+        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-brand2 flex items-center justify-center text-2xl animate-pulse">🌐</div>
+        <div class="text-sm font-medium">Ищем страницы…</div>
+        <div class="text-xs text-muted">Обычно 5–15 секунд.</div>
+      </div>
+    </div>
+
+    <div id="crawlStep3" class="hidden space-y-3">
+      <div class="text-sm">✓ Найдено <b id="crawlCount">0</b> страниц. Каждая обрабатывается в фоне.</div>
+      <div id="crawlList" class="space-y-1 max-h-[300px] overflow-y-auto pr-1 text-xs"></div>
+      <div class="flex justify-end">
+        <button id="doneCrawl" class="text-sm px-4 py-2 rounded-lg bg-gradient-to-r from-brand to-brand2 text-white font-medium">Готово</button>
       </div>
     </div>
   </div>

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { db, now, vecToBlob, UPLOADS_DIR, uploadsDirFor } from '../db.js';
 import {
   parseTextFile, parsePdfFile, parseDocxFile, fetchAndParseUrl, chunkText,
+  discoverSiteUrls,
 } from './knowledge.js';
 import { embedTexts } from './embeddings.js';
 import { invalidateAssistantCache } from './rag.js';
@@ -277,6 +278,57 @@ router.post('/:id/documents/url', async (req, res) => {
   res.json({ id: docId, status: 'pending' });
 
   processDocumentInBackground({ assistantId: req.params.id, docId, type: 'url', url });
+});
+
+// =============================================================
+// Краулер: дать корневой URL — обойти весь сайт по sitemap.xml
+// (если sitemap отсутствует — соберёт ссылки с главной страницы).
+// На каждую найденную страницу создаётся отдельный документ,
+// все индексируются параллельно в фоне.
+//
+// POST /:id/documents/crawl { url, maxPages?: 30, sameOriginOnly?: true }
+// =============================================================
+router.post('/:id/documents/crawl', async (req, res) => {
+  try {
+    const a = sql.getAssistant.get(req.params.id);
+    if (!a) return res.status(404).json({ error: 'not found' });
+    const { url, maxPages, sameOriginOnly } = req.body || {};
+    if (!url || !/^https?:\/\//i.test(url)) {
+      return res.status(400).json({ error: 'нужен валидный http(s) URL' });
+    }
+    const limit = Math.min(Math.max(parseInt(maxPages || 30, 10), 1), 100);
+
+    req.setTimeout(60_000);
+    res.setTimeout?.(60_000);
+
+    const urls = await discoverSiteUrls(url, {
+      maxPages: limit,
+      sameOriginOnly: sameOriginOnly !== false,
+    });
+
+    if (!urls.length) {
+      return res.status(404).json({ error: 'Не удалось найти ни одной страницы (sitemap.xml отсутствует и ссылки на главной не обнаружены).' });
+    }
+
+    const created = [];
+    for (const u of urls) {
+      const docId = randomUUID();
+      sql.insertDoc.run(docId, req.params.id, 'url', u, u, '', 'pending', null, 0, 0, now());
+      created.push({ id: docId, url: u });
+      processDocumentInBackground({ assistantId: req.params.id, docId, type: 'url', url: u });
+    }
+
+    res.json({
+      ok: true,
+      discoveredFrom: url,
+      pages: created,
+      count: created.length,
+      limit,
+    });
+  } catch (e) {
+    console.error('[crawl]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // =============================================================

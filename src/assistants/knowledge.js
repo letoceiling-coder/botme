@@ -37,50 +37,217 @@ export async function parseDocxFile(filePath) {
   return cleanWhitespace(r.value || '');
 }
 
-// Минимальная длина текста, чтобы считать парсинг успешным.
-// Если меньше — пробуем дополнительные стратегии (мета+JSON-LD, затем JS-rendering proxy).
-const MIN_USEFUL_TEXT_LEN = 300;
-
+// =============================================================
+// Главная функция: всегда комбинирует ВСЕ доступные источники
+// (статический HTML + мета+JSON-LD + JS-rendered через r.jina.ai)
+// и собирает максимально полный текст. Это критично для SPA, где
+// в исходном HTML только <div id="root"></div>.
+// =============================================================
 export async function fetchAndParseUrl(url) {
-  // Шаг 1: статический HTML
-  const html = await downloadHtml(url);
-  let { title, content } = extractMainContent(html, url);
+  // Параллельно: качаем статический HTML и идём в Jina (рендерит JS).
+  // Оба источника обычно дают разную, но дополняющую информацию:
+  //   - static HTML: title, meta, JSON-LD (контакты, schema.org, цены)
+  //   - jina:        реально отрендеренный markdown (продукты, тексты)
+  const [htmlRes, jinaRes] = await Promise.allSettled([
+    downloadHtml(url),
+    fetchViaJinaReader(url),
+  ]);
 
-  // Шаг 2: если по основному body мало текста (SPA, лендинг с пустым root)
-  // — попробуем дотянуть из мета-тегов и JSON-LD.
-  if (content.length < MIN_USEFUL_TEXT_LEN) {
+  let title = '';
+  const parts = [];
+
+  if (htmlRes.status === 'fulfilled' && htmlRes.value) {
+    const html = htmlRes.value;
+    const main = extractMainContent(html, url);
     const meta = extractMetaAndJsonLd(html);
-    const merged = [content, meta.text].filter(Boolean).join('\n\n').trim();
-    if (merged.length > content.length) {
-      content = merged;
-      if (!title && meta.title) title = meta.title;
-    }
+    if (main.title)  title = main.title;
+    if (!title && meta.title) title = meta.title;
+    if (meta.text)        parts.push({ src: 'meta',  text: meta.text });
+    if (main.content)     parts.push({ src: 'main',  text: main.content });
   }
 
-  // Шаг 3: всё ещё мало — пробуем публичный JS-rendering прокси r.jina.ai.
-  // Бесплатно, без ключа, отдаёт чистый markdown отрендеренной страницы.
-  if (content.length < MIN_USEFUL_TEXT_LEN) {
-    try {
-      const rendered = await fetchViaJinaReader(url);
-      if (rendered && rendered.length > content.length) {
-        content = rendered;
-      }
-    } catch (e) {
-      // мягкий fallback — если jina недоступна, оставляем что есть
-    }
+  if (jinaRes.status === 'fulfilled' && jinaRes.value) {
+    parts.push({ src: 'jina', text: jinaRes.value });
   }
 
-  if (!title) title = url;
+  // Дедупликация: если статический парсинг дал маленький body (SPA),
+  // а jina дала длинный — оставляем только jina + мета.
+  // Если статический парсинг был полноценный (SSR) — оставляем его и игнорим jina.
+  const combined = combineSources(parts, title);
 
-  if (content.length < 50) {
+  if (combined.content.length < 50) {
     throw new Error(
-      'Не удалось извлечь полезный текст со страницы. Возможно, это SPA с пустым HTML, ' +
-      'либо доступ закрыт авторизацией. Попробуйте загрузить документ файлом или вставить текст вручную.',
+      'Не удалось извлечь текст со страницы. Возможно, доступ закрыт авторизацией ' +
+      'или сайт блокирует ботов. Попробуйте загрузить файл или вставить текст вручную.',
     );
   }
 
-  return { title, content };
+  return { title: combined.title || title || url, content: combined.content };
 }
+
+function combineSources(parts, title) {
+  const meta = parts.find((p) => p.src === 'meta');
+  const main = parts.find((p) => p.src === 'main');
+  const jina = parts.find((p) => p.src === 'jina');
+
+  const out = [];
+
+  // Заголовок-метка
+  if (title) out.push(`# ${title}`);
+
+  // Мета и JSON-LD идут первыми — это структурированные факты (контакты, цены, услуги).
+  if (meta && meta.text && meta.text.length > 30) {
+    out.push('## Структурированная информация (мета-теги, schema.org)');
+    out.push(meta.text);
+  }
+
+  // Основной текст: предпочитаем больший по объёму из main/jina.
+  // Если оба пустые — берём что есть. Если оба длинные — берём оба
+  // (jina может содержать данные которых нет в main и наоборот).
+  const mainLen = main?.text?.length || 0;
+  const jinaLen = jina?.text?.length || 0;
+
+  if (mainLen >= 800 && jinaLen >= 800) {
+    out.push('## Содержимое страницы (статический HTML)');
+    out.push(main.text);
+    out.push('## Содержимое страницы (рендеренная версия)');
+    out.push(jina.text);
+  } else if (jinaLen > mainLen) {
+    if (jina && jina.text) {
+      out.push('## Содержимое страницы');
+      out.push(jina.text);
+    }
+  } else if (main && main.text) {
+    out.push('## Содержимое страницы');
+    out.push(main.text);
+  }
+
+  return { title, content: out.join('\n\n').trim() };
+}
+
+// =============================================================
+// Sitemap crawler: даёт корневой URL — обходим до N страниц
+// =============================================================
+
+/**
+ * Поиск URL'ов сайта через sitemap.xml и/или fallback-обход домашней страницы.
+ *
+ * @param {string} startUrl  любой URL сайта (например https://example.com/)
+ * @param {object} opts
+ * @param {number} opts.maxPages   жёсткий лимит, по умолчанию 30
+ * @param {boolean} opts.sameOriginOnly  только тот же хост, по умолчанию true
+ * @returns {Promise<string[]>}  массив абсолютных URL, начиная с самого startUrl
+ */
+export async function discoverSiteUrls(startUrl, { maxPages = 30, sameOriginOnly = true } = {}) {
+  const base = new URL(startUrl);
+  const origin = base.origin;
+  const found = new Set();
+  found.add(stripHash(startUrl));
+
+  // 1) пробуем sitemap.xml (включая sitemap index с детьми)
+  const sitemapCandidates = [
+    `${origin}/sitemap.xml`,
+    `${origin}/sitemap_index.xml`,
+    `${origin}/sitemap-index.xml`,
+  ];
+  for (const sm of sitemapCandidates) {
+    if (found.size >= maxPages) break;
+    try {
+      const urls = await fetchSitemapUrls(sm, maxPages - found.size + 5);
+      for (const u of urls) {
+        if (!sameOriginOnly || new URL(u).origin === origin) {
+          found.add(stripHash(u));
+          if (found.size >= maxPages) break;
+        }
+      }
+    } catch { /* sitemap может отсутствовать или быть битым */ }
+  }
+
+  // 2) если sitemap не дал результатов — парсим HTML главной и собираем <a href>
+  if (found.size < 2) {
+    try {
+      const html = await downloadHtml(startUrl);
+      const $ = cheerio.load(html);
+      $('a[href]').each((_, el) => {
+        if (found.size >= maxPages) return false;
+        const href = $(el).attr('href');
+        if (!href) return;
+        try {
+          const u = new URL(href, startUrl);
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+          if (sameOriginOnly && u.origin !== origin) return;
+          found.add(stripHash(u.toString()));
+        } catch { /* invalid href */ }
+      });
+    } catch { /* ignore */ }
+  }
+
+  // 3) если всё ещё мало (SPA с пустым HTML) — рендерим главную через Jina
+  // и вытаскиваем ссылки из markdown.
+  if (found.size < 2) {
+    try {
+      const md = await fetchViaJinaReader(startUrl);
+      const linkRe = /\((https?:\/\/[^\s)]+)\)/g;
+      let m;
+      while ((m = linkRe.exec(md)) !== null) {
+        if (found.size >= maxPages) break;
+        try {
+          const u = new URL(m[1]);
+          if (sameOriginOnly && u.origin !== origin) continue;
+          // отсеять картинки
+          if (/\.(png|jpe?g|gif|webp|svg|ico|css|js|woff2?|ttf)(\?|$)/i.test(u.pathname)) continue;
+          found.add(stripHash(u.toString()));
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+
+  return Array.from(found).slice(0, maxPages);
+}
+
+async function fetchSitemapUrls(sitemapUrl, limit) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15_000);
+  try {
+    const resp = await fetch(sitemapUrl, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BotmeBot/1.0)' },
+    });
+    if (!resp.ok) return [];
+    const xml = await resp.text();
+    const $ = cheerio.load(xml, { xmlMode: true });
+
+    // Sitemap-index: <sitemapindex><sitemap><loc>...</loc></sitemap></sitemapindex>
+    const childSitemaps = [];
+    $('sitemapindex sitemap > loc').each((_, el) => {
+      childSitemaps.push($(el).text().trim());
+    });
+    if (childSitemaps.length) {
+      const all = [];
+      for (const child of childSitemaps.slice(0, 5)) {
+        if (all.length >= limit) break;
+        try {
+          const sub = await fetchSitemapUrls(child, limit - all.length);
+          all.push(...sub);
+        } catch { /* skip */ }
+      }
+      return all;
+    }
+
+    // Обычный urlset: <urlset><url><loc>...</loc></url></urlset>
+    const urls = [];
+    $('urlset url > loc').each((_, el) => {
+      if (urls.length >= limit) return false;
+      const u = $(el).text().trim();
+      if (u) urls.push(u);
+    });
+    return urls;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function stripHash(u) { return u.replace(/#.*$/, ''); }
 
 async function downloadHtml(url) {
   const ctrl = new AbortController();
@@ -210,23 +377,33 @@ function humanKey(k) {
 }
 
 // Публичный read-mode прокси с JS-рендерингом. Бесплатно, без ключа.
-// Возвращает чистый markdown отрендеренной страницы.
+// Возвращает чистый markdown отрендеренной страницы. Опционально
+// можно задать JINA_API_KEY в .env для увеличенных лимитов.
 async function fetchViaJinaReader(url) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 25_000);
+  const t = setTimeout(() => ctrl.abort(), 35_000);
   try {
     const proxied = `https://r.jina.ai/${url}`;
+    const headers = {
+      'Accept': 'text/plain',
+      'User-Agent': 'Mozilla/5.0 (compatible; BotmeBot/1.0)',
+      // Просим Jina вернуть ссылки и изображения как элементы,
+      // чтобы потом RAG мог их использовать
+      'X-Return-Format': 'markdown',
+    };
+    if (process.env.JINA_API_KEY) {
+      headers.Authorization = `Bearer ${process.env.JINA_API_KEY}`;
+    }
     const resp = await fetch(proxied, {
       signal: ctrl.signal,
-      headers: {
-        'Accept': 'text/plain',
-        'User-Agent': 'Mozilla/5.0 (compatible; BotmeBot/1.0)',
-      },
+      headers,
       redirect: 'follow',
     });
     if (!resp.ok) return '';
     const txt = await resp.text();
     return cleanWhitespace(txt);
+  } catch {
+    return '';
   } finally {
     clearTimeout(t);
   }

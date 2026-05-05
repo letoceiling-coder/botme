@@ -697,6 +697,62 @@ $('#convModal').addEventListener('click', (e) => { if (e.target.id === 'convModa
 function safeJson(s, fallback) { try { return s ? JSON.parse(s) : fallback; } catch { return fallback; } }
 
 // =============================================================
+// Краулер сайта (sitemap.xml)
+// =============================================================
+$('#crawlSiteBtn').addEventListener('click', () => {
+  const prefill = $('#urlInput').value.trim();
+  if (prefill) $('#crawlUrl').value = prefill;
+  $('#crawlStep1').classList.remove('hidden');
+  $('#crawlStep2').classList.add('hidden');
+  $('#crawlStep3').classList.add('hidden');
+  $('#crawlModal').classList.remove('hidden');
+  setTimeout(() => $('#crawlUrl').focus(), 50);
+});
+
+$('#closeCrawl').addEventListener('click', () => $('#crawlModal').classList.add('hidden'));
+$('#cancelCrawl').addEventListener('click', () => $('#crawlModal').classList.add('hidden'));
+$('#doneCrawl').addEventListener('click', () => { $('#crawlModal').classList.add('hidden'); loadDocs(); });
+$('#crawlModal').addEventListener('click', (e) => { if (e.target.id === 'crawlModal') $('#crawlModal').classList.add('hidden'); });
+
+$('#runCrawl').addEventListener('click', async () => {
+  const url = $('#crawlUrl').value.trim();
+  if (!url || !/^https?:\/\//i.test(url)) { alert('Введите валидный URL'); return; }
+  const payload = {
+    url,
+    maxPages: parseInt($('#crawlLimit').value, 10) || 30,
+    sameOriginOnly: $('#crawlSameOrigin').value === 'true',
+  };
+
+  $('#crawlStep1').classList.add('hidden');
+  $('#crawlStep2').classList.remove('hidden');
+
+  try {
+    const r = await fetch(`/api/assistants/${ASSISTANT_ID}/documents/crawl`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    $('#crawlStep2').classList.add('hidden');
+    $('#crawlStep3').classList.remove('hidden');
+    $('#crawlCount').textContent = data.count;
+    $('#crawlList').innerHTML = data.pages.map((p) => `
+      <div class="flex items-center gap-2 py-1 border-b border-border/50">
+        <span class="text-muted">${escapeHtml((new URL(p.url)).pathname || '/')}</span>
+        <span class="ml-auto text-muted/70 text-[10px] uppercase">pending</span>
+      </div>`).join('');
+    loadDocs();
+  } catch (e) {
+    $('#crawlStep2').classList.add('hidden');
+    $('#crawlStep1').classList.remove('hidden');
+    alert('Ошибка краула: ' + e.message);
+  }
+});
+
+// =============================================================
 // AI-генератор базы знаний
 // =============================================================
 $('#aiGenBtn').addEventListener('click', () => {
