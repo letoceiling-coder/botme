@@ -5,6 +5,7 @@ import * as cheerio from 'cheerio';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import mammoth from 'mammoth';
+import * as XLSX from 'xlsx';
 import { encode } from 'gpt-tokenizer';
 import { createRequire } from 'node:module';
 
@@ -35,6 +36,29 @@ export async function parseDocxFile(filePath) {
   const buf = await fs.readFile(filePath);
   const r = await mammoth.extractRawText({ buffer: buf });
   return cleanWhitespace(r.value || '');
+}
+
+/** Excel (.xlsx / старый .xls) → текст с вкладками и табами между колонками (удобно для RAG и смет). */
+const XLSX_MAX_ROWS_PER_SHEET = 2000;
+
+export async function parseXlsxFile(filePath) {
+  const buf = await fs.readFile(filePath);
+  const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+  if (!wb.SheetNames?.length) throw new Error('Файл Excel не содержит листов.');
+  const parts = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    let csv = XLSX.utils.sheet_to_csv(ws, { FS: '\t', RS: '\n', blankrows: false });
+    const lines = csv.split('\n');
+    if (lines.length > XLSX_MAX_ROWS_PER_SHEET) {
+      csv = `${lines.slice(0, XLSX_MAX_ROWS_PER_SHEET).join('\n')}\n… (обрезано: первые ${XLSX_MAX_ROWS_PER_SHEET} строк листа)`;
+    }
+    parts.push(`## Лист «${sheetName}»\n${csv}`);
+  }
+  const body = parts.join('\n\n').trim();
+  if (!body) throw new Error('Не удалось извлечь данные из Excel.');
+  return cleanWhitespace(body);
 }
 
 // =============================================================

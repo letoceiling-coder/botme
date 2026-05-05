@@ -3,7 +3,7 @@
 Универсальная платформа из двух модулей:
 
 1. **AI Site Builder** — чат-агент собирает рабочие **сайты** и **браузерные игры** (HTML + Tailwind + JS, опционально многостраничные и React-проекты через CDN). Файлы лежат в `projects/<uuid>/`, открываются двойным кликом, скачиваются как `.html` или `.zip`.
-2. **AI Ассистенты с RAG** — создание ассистентов с собственной базой знаний (документы, URL, PDF, DOCX), векторный поиск, чат-тест, публичный API с токенами и rate-limit, embeddable-виджет с темами и сбором лидов.
+2. **AI Ассистенты с RAG** — создание ассистентов с собственной базой знаний (документы, URL, PDF, DOCX, **Excel xlsx/xls**), векторный поиск, чат-тест, публичный API с токенами и rate-limit, embeddable-виджет с темами и сбором лидов.
 
 Поддержка четырёх провайдеров моделей:
 
@@ -31,7 +31,7 @@ botme/
 │   ├── db.js                     — better-sqlite3 + миграции (8 таблиц)
 │   ├── assistants/
 │   │   ├── routes.js             — /api/assistants/* (админка)
-│   │   ├── knowledge.js          — парсинг (txt/url/pdf/docx) + чанкинг 600 токенов
+│   │   ├── knowledge.js          — парсинг (txt/url/pdf/docx/xlsx) + чанкинг 600 токенов
 │   │   ├── embeddings.js         — OpenAI embeddings (батч 100, retry)
 │   │   ├── rag.js                — in-memory cosine similarity + LRU кеш
 │   │   ├── chat.js               — askAssistant() + лид-триггеры + SSE
@@ -117,7 +117,7 @@ Bearer-аутентификация: `Authorization: Bearer ast_<32hex>`. CORS=*
 - **Backend:** Node.js 20+ (ESM), Express, better-sqlite3
 - **AI SDK:** `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`
 - **RAG:** OpenAI embeddings + in-memory cosine + LRU
-- **Парсеры:** `pdf-parse`, `mammoth` (DOCX), `cheerio` + `@mozilla/readability` (URL)
+- **Парсеры:** `pdf-parse`, `mammoth` (DOCX), `xlsx` (Excel), `cheerio` + `@mozilla/readability` (URL)
 - **Токены:** `gpt-tokenizer` (чанкинг)
 - **Загрузки:** `multer`
 - **Frontend:** vanilla JS + Tailwind CDN, без сборки

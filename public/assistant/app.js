@@ -137,7 +137,7 @@ async function loadDocs() {
 }
 $('#refreshDocs').addEventListener('click', loadDocs);
 
-const DOC_ICONS = { pdf: '📕', docx: '📘', md: '📝', txt: '📄', text: '✍️', url: '🔗' };
+const DOC_ICONS = { pdf: '📕', docx: '📘', xlsx: '📗', md: '📝', txt: '📄', text: '✍️', url: '🔗' };
 
 function renderDocs(list) {
   const el = $('#docList');

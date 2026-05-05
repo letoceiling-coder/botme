@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 
 import { db, now, vecToBlob, UPLOADS_DIR, uploadsDirFor } from '../db.js';
 import {
-  parseTextFile, parsePdfFile, parseDocxFile, fetchAndParseUrl, chunkText,
+  parseTextFile, parsePdfFile, parseDocxFile, parseXlsxFile, fetchAndParseUrl, chunkText,
   discoverSiteUrls,
 } from './knowledge.js';
 import { embedTexts } from './embeddings.js';
@@ -219,14 +219,14 @@ router.delete('/:id/documents/:docId', async (req, res) => {
   if (!doc) return res.status(404).json({ error: 'not found' });
   sql.deleteDoc.run(doc.id, req.params.id); // каскадно удалит чанки
   invalidateAssistantCache(req.params.id);
-  if (doc.source && (doc.type === 'pdf' || doc.type === 'docx' || doc.type === 'txt' || doc.type === 'md')) {
+  if (doc.source && (doc.type === 'pdf' || doc.type === 'docx' || doc.type === 'xlsx' || doc.type === 'txt' || doc.type === 'md')) {
     const filePath = path.join(uploadsDirFor(req.params.id), path.basename(doc.source));
     try { await fs.rm(filePath, { force: true }); } catch {}
   }
   res.json({ ok: true });
 });
 
-// Загрузка файла (PDF/DOCX/TXT/MD)
+// Загрузка файла (PDF/DOCX/XLSX/XLS/TXT/MD)
 router.post('/:id/documents/file', upload.single('file'), async (req, res) => {
   try {
     const a = sql.getAssistant.get(req.params.id);
@@ -235,8 +235,8 @@ router.post('/:id/documents/file', upload.single('file'), async (req, res) => {
 
     const orig = req.file.originalname || 'file';
     const ext = (path.extname(orig).toLowerCase().replace('.', '') || 'txt');
-    const type = ({ pdf: 'pdf', docx: 'docx', md: 'md', markdown: 'md', txt: 'txt' })[ext];
-    if (!type) return res.status(400).json({ error: `Неподдерживаемый формат: .${ext}. Только pdf/docx/md/txt` });
+    const type = ({ pdf: 'pdf', docx: 'docx', xlsx: 'xlsx', xls: 'xlsx', md: 'md', markdown: 'md', txt: 'txt' })[ext];
+    if (!type) return res.status(400).json({ error: `Неподдерживаемый формат: .${ext}. Допустимы: pdf, docx, xlsx, xls, md, txt` });
 
     const docId = randomUUID();
     const dir = uploadsDirFor(req.params.id);
@@ -654,6 +654,8 @@ async function processDocumentInBackground({ assistantId, docId, type, filePath,
       content = await parsePdfFile(filePath);
     } else if (type === 'docx') {
       content = await parseDocxFile(filePath);
+    } else if (type === 'xlsx') {
+      content = await parseXlsxFile(filePath);
     } else if (type === 'md' || type === 'txt') {
       content = await parseTextFile(filePath);
     } else if (type === 'url') {
