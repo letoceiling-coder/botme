@@ -8,6 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: path.join(rootDir, '.env') });
+loadEnv({
+  path: path.join(rootDir, '.env'),
+  override: true, // PM2/dump может пробросить пустые ключи — перезаписываем из файла
+});
 
 await import('./server.js');
