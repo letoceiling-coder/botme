@@ -72,19 +72,7 @@ npm start                  # http://localhost:3001
 
 ## Деплой на VPS (botme.neeklo.ru)
 
-См. **[DEPLOY.md](./DEPLOY.md)**. Кратко:
-
-```bash
-ssh root@89.169.39.244
-cd /var/www && git clone git@github.com:letoceiling-coder/botme.git botme && cd botme
-npm ci --omit=dev
-cp .env.example .env && nano .env       # вставить ключи
-pm2 start ecosystem.config.cjs && pm2 save && pm2 startup
-sudo cp deploy/nginx/botme.neeklo.ru.conf /etc/nginx/sites-available/botme.neeklo.ru
-sudo ln -sf /etc/nginx/sites-available/botme.neeklo.ru /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d botme.neeklo.ru --cert-name botme.neeklo.ru --redirect
-```
+Архитектура сервера: HAProxy(:443, SNI passthrough) → Nginx(127.0.0.1:9443, SSL) → Node(127.0.0.1:3015) под PM2. Полная пошаговая инструкция — **[DEPLOY.md](./DEPLOY.md)**.
 
 Обновления — `git push` локально, на сервере `bash scripts/deploy.sh`.
 

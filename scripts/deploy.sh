@@ -24,7 +24,8 @@ pm2 save
 
 echo "==> 4/4  Smoke test..."
 sleep 2
-curl -fsS http://127.0.0.1:3001/api/v1/health | head -c 200 && echo
+PORT_TO_CHECK="${PORT:-3015}"
+curl -fsS "http://127.0.0.1:${PORT_TO_CHECK}/api/v1/health" | head -c 200 && echo
 
 echo
 echo "✓ Deploy complete: $(date -Iseconds)"
