@@ -14,8 +14,9 @@ const __dirname  = path.dirname(__filename);
 // Клиенты SDK
 // =============================================================
 export const ollama = new OpenAI({
-  baseURL: process.env.OLLAMA_BASE_URL,
-  apiKey: process.env.OLLAMA_TOKEN,
+  baseURL: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434/v1',
+  // SDK иначе может требовать OPENAI_API_KEY; для Ollama достаточно непустой строки
+  apiKey: process.env.OLLAMA_TOKEN || 'ollama',
 });
 
 export const openai = process.env.OPENAI_API_KEY
