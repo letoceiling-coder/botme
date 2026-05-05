@@ -279,13 +279,22 @@ body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
 /* ===== Лиды ===== */
 .lead-row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 2fr auto;
+  grid-template-columns: minmax(100px, 1.15fr) 1fr 1fr minmax(92px, auto) minmax(80px, 1.35fr) auto;
   gap: 12px; align-items: center;
   padding: 10px 14px;
   background: #11141b;
   border: 1px solid #222836;
   border-radius: 10px;
   font-size: 13px;
+}
+.lead-chat-btn {
+  font-size: 11px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid rgba(124,92,255,.45);
+  background: rgba(124,92,255,.12); color: #c4b5fd;
+  cursor: pointer; white-space: nowrap; transition: background .15s, border-color .15s;
+}
+.lead-chat-btn:hover {
+  background: rgba(124,92,255,.22); border-color: rgba(124,92,255,.65); color: #e9e5ff;
 }
 .lead-row .lead-date { color: #8a93a6; font-size: 11.5px; }
 

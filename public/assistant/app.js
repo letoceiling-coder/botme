@@ -694,7 +694,12 @@ function renderLeads(leads) {
     el.innerHTML = `<div class="text-muted text-sm py-8 text-center bg-panel border border-border rounded-xl">Пока нет лидов. Они появятся здесь, когда пользователи оставят контакты в виджете или через API.</div>`;
     return;
   }
-  el.innerHTML = leads.map((l) => `
+  el.innerHTML = leads.map((l) => {
+    const convId = l.conversation_id || '';
+    const chatBtn = convId
+      ? `<button type="button" class="lead-chat-btn open-lead-conv-btn" data-conv="${escapeHtml(convId)}">Чат</button>`
+      : '<span class="text-muted text-xs">—</span>';
+    return `
     <div class="lead-row" data-id="${l.id}">
       <div>
         <div class="font-medium">${escapeHtml(l.name || '—')}</div>
@@ -702,14 +707,19 @@ function renderLeads(leads) {
       </div>
       <div>${escapeHtml(l.phone || '—')}</div>
       <div class="truncate" title="${escapeHtml(l.email || '')}">${escapeHtml(l.email || '—')}</div>
-      <div class="truncate text-muted text-xs" title="${escapeHtml(l.message || '')}">${escapeHtml(l.message || '')}</div>
+      <div>${chatBtn}</div>
+      <div class="truncate text-muted text-xs" title="${escapeHtml(l.message || '')}">${escapeHtml(l.message || '—')}</div>
       <button class="text-xs px-2 py-1 rounded bg-panel2 border border-border hover:border-err/50 hover:text-err del-lead-btn" data-id="${l.id}">×</button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
   el.querySelectorAll('.del-lead-btn').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Удалить лид?')) return;
     await fetch(`/api/assistants/${ASSISTANT_ID}/leads/${b.dataset.id}`, { method: 'DELETE' });
     loadLeads();
+  }));
+  el.querySelectorAll('.open-lead-conv-btn').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    openConversation(b.dataset.conv);
   }));
 }
 
