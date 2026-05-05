@@ -52,6 +52,43 @@ const state = {
   currentPage: 'index.html', // активная страница в превью
 };
 
+/** Подсказки в пузырьке ожидания — меняются со временем (генерация может идти долго). */
+const GENERATION_WAIT_HINTS = [
+  'Модель генерирует код и разметку — первые собранные файлы часто появляются не сразу.',
+  'Большие сайты и игры могут занимать несколько минут: это нормально для качественного результата.',
+  'Запрос выполняется на сервере; вкладку можно не закрывать — ответ придёт одним блоком.',
+  'Если провайдер LLM перегружен, ожидание может затягиваться; соединение не оборвано, пока виден таймер.',
+];
+
+const IMPROVE_WAIT_HINTS = [
+  'Модель переписывает промпт в более детальный вариант…',
+  'Уточняются формулировки и структура задачи для генератора…',
+];
+
+let statusTickerId = null;
+
+function clearStatusTicker() {
+  if (statusTickerId !== null) {
+    clearInterval(statusTickerId);
+    statusTickerId = null;
+  }
+}
+
+function formatMmSs(totalSec) {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function removeAssistantLoadingBubble(el) {
+  if (!el) return;
+  if (el._waitTicker) {
+    clearInterval(el._waitTicker);
+    el._waitTicker = null;
+  }
+  el.remove();
+}
+
 // =============================================================
 // API helpers
 // =============================================================
@@ -300,15 +337,29 @@ function addMessageToDOM(role, content) {
   return wrap;
 }
 
-function addLoadingMessage() {
+function addLoadingMessage(hints = GENERATION_WAIT_HINTS) {
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-assistant';
   wrap.innerHTML = `
     <div class="avatar avatar-ai">AI</div>
-    <div class="bubble">
+    <div class="bubble loading-bubble">
       <div class="typing"><span></span><span></span><span></span></div>
-      <div class="text-xs text-muted mt-1">генерирую…</div>
+      <div class="text-sm text-text/95 mt-2 font-medium">Генерация ответа модели…</div>
+      <div class="loading-hint text-xs text-muted mt-2 leading-relaxed"></div>
+      <div class="loading-elapsed text-[11px] text-muted/85 mt-1.5 tabular-nums"></div>
     </div>`;
+  const hintEl = wrap.querySelector('.loading-hint');
+  const elapsedEl = wrap.querySelector('.loading-elapsed');
+  const t0 = Date.now();
+  const stepMs = 26000;
+  const tick = () => {
+    const sec = Math.floor((Date.now() - t0) / 1000);
+    const idx = Math.min(Math.floor(sec / (stepMs / 1000)), hints.length - 1);
+    hintEl.textContent = hints[idx];
+    elapsedEl.textContent = `Прошло ${formatMmSs(sec)} · запрос обрабатывается, страница не зависла`;
+  };
+  tick();
+  wrap._waitTicker = setInterval(tick, 1000);
   els.messages.appendChild(wrap);
   els.messages.scrollTop = els.messages.scrollHeight;
   return wrap;
@@ -395,14 +446,23 @@ async function sendPrompt() {
 
   state.busy = true;
   els.sendBtn.disabled = true;
-  els.status.innerHTML = `<span class="dot loading"></span>модель: ${model}`;
+
+  const genStarted = Date.now();
+  clearStatusTicker();
+  const tickGenStatus = () => {
+    const sec = Math.floor((Date.now() - genStarted) / 1000);
+    els.status.innerHTML =
+      `<span class="dot loading"></span><span>${escapeHtml(model)} · генерация · ${formatMmSs(sec)} · подождите</span>`;
+  };
+  tickGenStatus();
+  statusTickerId = setInterval(tickGenStatus, 1000);
 
   // Сразу отрисовываем сообщение пользователя + индикатор загрузки
   if (state.currentMessages.length === 0) els.messages.innerHTML = '';
   state.currentMessages.push({ role: 'user', content: prompt });
   addMessageToDOM('user', prompt);
   els.prompt.value = '';
-  const loadingEl = addLoadingMessage();
+  const loadingEl = addLoadingMessage(GENERATION_WAIT_HINTS);
 
   try {
     const res = await api('/api/generate', {
@@ -413,7 +473,7 @@ async function sendPrompt() {
         model,
       }),
     });
-    loadingEl.remove();
+    removeAssistantLoadingBubble(loadingEl);
     state.currentId = res.id;
     state.currentMessages.push({ role: 'assistant', content: res.assistant });
     addMessageToDOM('assistant', res.assistant);
@@ -426,10 +486,11 @@ async function sendPrompt() {
     const fb = res.fallbackFrom ? ` (fallback с ${res.fallbackFrom})` : '';
     els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage.total} токенов${fb}`;
   } catch (e) {
-    loadingEl.remove();
+    removeAssistantLoadingBubble(loadingEl);
     addMessageToDOM('assistant', `❌ Ошибка: ${e.message}`);
     els.status.innerHTML = `<span class="dot err"></span>ошибка`;
   } finally {
+    clearStatusTicker();
     state.busy = false;
     els.sendBtn.disabled = false;
   }
@@ -449,8 +510,17 @@ async function improvePrompt() {
   els.improveBtn.disabled = true;
   els.sendBtn.disabled = true;
   const oldText = els.improveBtn.textContent;
-  els.improveBtn.textContent = '⏳ Улучшаю…';
-  els.status.innerHTML = `<span class="dot loading"></span>улучшаю промпт через Claude Haiku…`;
+  const impStarted = Date.now();
+  clearStatusTicker();
+  const tickImprove = () => {
+    const sec = Math.floor((Date.now() - impStarted) / 1000);
+    const hi = IMPROVE_WAIT_HINTS[Math.min(Math.floor(sec / 18), IMPROVE_WAIT_HINTS.length - 1)];
+    els.status.innerHTML =
+      `<span class="dot loading"></span><span>${escapeHtml(hi)} · ${formatMmSs(sec)}</span>`;
+    els.improveBtn.textContent = `⏳ Улучшаю… ${formatMmSs(sec)}`;
+  };
+  tickImprove();
+  statusTickerId = setInterval(tickImprove, 1000);
 
   try {
     const res = await api('/api/improve-prompt', {
@@ -464,6 +534,7 @@ async function improvePrompt() {
   } catch (e) {
     flashStatus('Ошибка: ' + e.message, 'err');
   } finally {
+    clearStatusTicker();
     state.busy = false;
     els.improveBtn.disabled = false;
     els.sendBtn.disabled = false;
