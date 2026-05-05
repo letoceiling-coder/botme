@@ -14,12 +14,9 @@ git pull --ff-only
 echo "==> 2/4  Installing dependencies..."
 npm ci --omit=dev
 
-echo "==> 3/4  Reloading PM2 process..."
-if pm2 list | grep -q "botme"; then
-    pm2 reload botme --update-env
-else
-    pm2 start ecosystem.config.cjs
-fi
+echo "==> 3/4  Restarting PM2 from ecosystem.config.cjs..."
+pm2 delete botme 2>/dev/null || true
+pm2 start ecosystem.config.cjs
 pm2 save
 
 echo "==> 4/4  Smoke test..."

@@ -1,4 +1,5 @@
-import 'dotenv/config';
+// Переменные окружения подхватывает server-entry.mjs (PM2 / npm start).
+// Прямой запуск: node server-entry.mjs
 import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
@@ -465,11 +466,13 @@ app.use('/preview/:id', async (req, res, next) => {
 app.get('/api/models', async (_req, res) => {
   try {
     const list = await getModelsMerged();
+    const orKey = !!(process.env.OPENROUTER_API_KEY || '').trim();
     res.json(list.map((m) => ({
       id: m.id,
       label: m.label,
       provider: m.provider,
       ...(m.openrouterFree ? { free: true } : {}),
+      ...(m.provider === 'openrouter' && !orKey ? { needsOpenRouterKey: true } : {}),
     })));
   } catch (e) {
     console.error('[api/models]', e);

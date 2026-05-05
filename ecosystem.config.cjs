@@ -5,7 +5,7 @@ module.exports = {
   apps: [
     {
       name: 'botme',
-      script: 'server.js',
+      script: 'server-entry.mjs',
       cwd: __dirname,
       exec_mode: 'fork',         // Express + better-sqlite3 — single instance
       instances: 1,
@@ -15,7 +15,7 @@ module.exports = {
       time: true,
       env: {
         NODE_ENV: 'production',
-        // PORT берётся из .env, который dotenv грузит в server.js
+        // PORT и секреты: см. .env в cwd — подхватывает server-entry.mjs перед импортом server.js
       },
       // Логи в каталоге проекта (pm2 logs botme)
       out_file: './logs/out.log',

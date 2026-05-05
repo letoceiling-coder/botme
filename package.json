@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "AI чат-агент для генерации сайтов и браузерных игр (OpenAI, Claude, Gemini, Ollama qwen2.5-coder)",
   "type": "module",
-  "main": "server.js",
+  "main": "server-entry.mjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server-entry.mjs",
+    "dev": "node --watch server-entry.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

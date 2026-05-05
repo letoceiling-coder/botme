@@ -144,7 +144,10 @@ function updateModelHint() {
   if (!m) return;
   if (m.provider === 'openrouter') {
     const freeNote = m.free ? '🆓 Бесплатная по тарифам OpenRouter · ' : '';
-    els.modelHint.textContent = `${freeNote}Единый API OpenRouter, модель с поддержкой tools. Подходит для экспериментов и альтернативных провайдеров.`;
+    const keyNote = m.needsOpenRouterKey
+      ? '⚠ На сервере не задан OPENROUTER_API_KEY в .env или процесс не перезапущен. '
+      : '';
+    els.modelHint.textContent = `${keyNote}${freeNote}Маршрутизация через OpenRouter (поддержка tools).`;
     return;
   }
   const tips = {

@@ -30,17 +30,27 @@ export const gemini = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null;
 
-/** OpenAI-совместимый API: https://openrouter.ai/docs */
-export const openrouter = process.env.OPENROUTER_API_KEY
-  ? new OpenAI({
-      apiKey: process.env.OPENROUTER_API_KEY,
+/** OpenAI-совместимый API OpenRouter — клиент создаём лениво после загрузки .env */
+let openRouterClient = null;
+
+export function isOpenRouterConfigured() {
+  return !!(process.env.OPENROUTER_API_KEY || '').trim();
+}
+
+function getOpenRouterClient() {
+  if (!isOpenRouterConfigured()) return null;
+  if (!openRouterClient) {
+    openRouterClient = new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY.trim(),
       baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
       defaultHeaders: {
         'HTTP-Referer': process.env.OPENROUTER_HTTP_REFERER || process.env.PUBLIC_SITE_URL || 'https://botme.neeklo.ru',
         'X-Title': process.env.OPENROUTER_APP_TITLE || 'Botme',
       },
-    })
-  : null;
+    });
+  }
+  return openRouterClient;
+}
 
 // =============================================================
 // Каталог моделей
@@ -114,7 +124,6 @@ function ruHintOpenRouter(m) {
 }
 
 export async function fetchOpenRouterToolModelsCached() {
-  if (!openrouter) return [];
   const now = Date.now();
   if (openRouterCatalogCache.entries.length && now - openRouterCatalogCache.ts < OPENROUTER_CACHE_MS) {
     return openRouterCatalogCache.entries;
@@ -148,10 +157,9 @@ export async function fetchOpenRouterToolModelsCached() {
   return entries;
 }
 
-/** Статический каталог + OpenRouter (если задан OPENROUTER_API_KEY). */
+/** Статический каталог + OpenRouter (список моделей с публичного API; вызов — только с ключом). */
 export async function getModelsMerged() {
   const base = MODELS.map((m) => ({ ...m, openrouterFree: false }));
-  if (!openrouter) return base;
   try {
     const extra = await fetchOpenRouterToolModelsCached();
     return [...base, ...extra];
@@ -293,7 +301,8 @@ export async function callModel(modelId, messages, { maxTokens, temperature = 0.
   }
 
   if (cfg.provider === 'openrouter') {
-    if (!openrouter) throw new Error('OPENROUTER_API_KEY не настроен');
+    const or = getOpenRouterClient();
+    if (!or) throw new Error('OPENROUTER_API_KEY не настроен');
     const cap = Math.min(maxTokens || 16384, 128000);
     const params = {
       model: cfg.model,
@@ -303,7 +312,7 @@ export async function callModel(modelId, messages, { maxTokens, temperature = 0.
     };
 
     if (stream && onDelta) {
-      const s = await openrouter.chat.completions.create({ ...params, stream: true });
+      const s = await or.chat.completions.create({ ...params, stream: true });
       let full = '';
       let usage = { input: 0, output: 0, total: 0 };
       for await (const part of s) {
@@ -314,7 +323,7 @@ export async function callModel(modelId, messages, { maxTokens, temperature = 0.
       }
       return { text: full, usage };
     }
-    const r = await openrouter.chat.completions.create(params);
+    const r = await or.chat.completions.create(params);
     const u = r.usage || {};
     return {
       text: r.choices?.[0]?.message?.content || '',

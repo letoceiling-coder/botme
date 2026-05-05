@@ -164,7 +164,7 @@ cd /var/www/botme
 bash scripts/deploy.sh
 ```
 
-Скрипт делает `git pull --ff-only`, `npm ci --omit=dev`, `pm2 reload`, smoke-test.
+Скрипт делает `git pull --ff-only`, `npm ci --omit=dev`, перезапуск PM2 из `ecosystem.config.cjs` (точка входа `server-entry.mjs` + загрузка `.env`), smoke-test.
 
 ---
 
