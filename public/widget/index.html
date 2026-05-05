@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Чат</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --brand: #7c5cff; --brand2: #22d3ee; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: #0b0d12; color: #e6e8ee;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a3142; border-radius: 4px; }
+  .header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px; background: linear-gradient(135deg, var(--brand), var(--brand2));
+    color: white; flex-shrink: 0;
+  }
+  .header .avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(255,255,255,0.18);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+    background-size: cover; background-position: center;
+  }
+  .messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .msg { display: flex; gap: 8px; animation: fade .2s ease; }
+  .msg-user { justify-content: flex-end; }
+  .bubble {
+    max-width: 82%;
+    padding: 10px 13px;
+    border-radius: 14px;
+    font-size: 13.5px; line-height: 1.5;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .msg-user .bubble {
+    background: linear-gradient(135deg, var(--brand), var(--brand2));
+    color: white; border-bottom-right-radius: 4px;
+  }
+  .msg-assistant .bubble {
+    background: #161a23; border: 1px solid #222836; color: #e6e8ee;
+    border-bottom-left-radius: 4px;
+  }
+  .ai-avatar {
+    width: 26px; height: 26px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--brand), var(--brand2));
+    color: white; font-size: 11px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background-size: cover; background-position: center;
+  }
+  .typing { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
+  .typing span {
+    width: 6px; height: 6px; border-radius: 50%; background: #8a93a6;
+    animation: bounce 1.2s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: .15s; }
+  .typing span:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce {
+    0%,60%,100% { transform: translateY(0); opacity: .4; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+  @keyframes fade {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .sources {
+    margin-top: 6px; font-size: 11px; color: #8a93a6;
+  }
+  .sources details summary { cursor: pointer; color: #a78bfa; }
+  .source-item {
+    background: #0f1119; border: 1px solid #1a2030;
+    border-radius: 8px; padding: 6px 8px; margin-top: 4px;
+    font-size: 11px; color: #c9cdd9;
+  }
+  .lead-card {
+    background: #161a23; border: 1px solid var(--brand);
+    border-radius: 14px; padding: 12px;
+    animation: fade .3s ease;
+  }
+  .lead-card input {
+    width: 100%; background: #0b0d12; border: 1px solid #222836;
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; color: white;
+    margin-top: 6px;
+  }
+  .lead-card input:focus { outline: none; border-color: var(--brand); }
+  .footer {
+    padding: 8px 12px; border-top: 1px solid #222836; flex-shrink: 0;
+    background: #11141b;
+  }
+  .composer {
+    display: flex; gap: 8px;
+  }
+  .composer input {
+    flex: 1; background: #0b0d12; border: 1px solid #222836;
+    border-radius: 10px; padding: 10px 12px; font-size: 13.5px;
+    color: white; outline: none;
+  }
+  .composer input:focus { border-color: var(--brand); }
+  .composer button {
+    width: 42px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand2));
+    color: white; border: none; cursor: pointer; font-size: 16px;
+    transition: transform .15s;
+  }
+  .composer button:hover { transform: scale(1.05); }
+  .composer button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .powered { text-align: center; font-size: 10px; color: #6b7280; margin-top: 6px; }
+  .powered a { color: #8a93a6; text-decoration: none; }
+  .close-btn {
+    margin-left: auto; background: rgba(255,255,255,0.18);
+    border: none; color: white; cursor: pointer;
+    width: 28px; height: 28px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; transition: background .15s;
+  }
+  .close-btn:hover { background: rgba(255,255,255,0.3); }
+</style>
+</head>
+<body>
+
+<div id="header" class="header">
+  <div id="avatar" class="avatar">💬</div>
+  <div class="min-w-0 flex-1">
+    <div id="brand" class="font-semibold truncate text-[14.5px]">AI-ассистент</div>
+    <div id="status" class="text-[11px] opacity-80">Онлайн</div>
+  </div>
+  <button id="closeBtn" class="close-btn" title="Свернуть">×</button>
+</div>
+
+<div id="messages" class="messages"></div>
+
+<div class="footer">
+  <form id="composer" class="composer">
+    <input id="input" type="text" autocomplete="off" placeholder="Напишите сообщение…" />
+    <button type="submit" id="sendBtn" aria-label="Отправить">→</button>
+  </form>
+  <div class="powered">
+    powered by <a href="https://botme.neeklo.ru/" target="_blank" rel="noopener">botme.neeklo.ru</a>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get('token');
+const HOST  = location.origin;
+const SESSION_KEY = 'botme.sid.' + (TOKEN || '').slice(-12);
+let SESSION_ID = localStorage.getItem(SESSION_KEY);
+if (!SESSION_ID) {
+  SESSION_ID = 'sid_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  localStorage.setItem(SESSION_KEY, SESSION_ID);
+}
+
+let assistant = null;
+let leadOffered = false;
+
+if (!TOKEN) {
+  $('#messages').innerHTML = '<div class="text-red-400 text-sm p-4">Нет token. Виджет встроен некорректно.</div>';
+} else {
+  init();
+}
+
+async function init() {
+  try {
+    const r = await fetch(HOST + '/api/v1/assistant', { headers: { Authorization: 'Bearer ' + TOKEN } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    assistant = await r.json();
+    applyTheme(assistant);
+    if (assistant.greeting) appendMessage('assistant', assistant.greeting);
+    parent && parent.postMessage({ source: 'botme-widget', type: 'ready' }, '*');
+  } catch (e) {
+    appendMessage('assistant', 'Ошибка инициализации: ' + e.message);
+  }
+}
+
+function applyTheme(a) {
+  const t = a.theme || {};
+  if (t.color)  { document.documentElement.style.setProperty('--brand', t.color); }
+  // brand2 = lighten(color)
+  if (t.color)  { document.documentElement.style.setProperty('--brand2', lighten(t.color, 0.25)); }
+  $('#brand').textContent = t.brand || a.name || 'AI-ассистент';
+  if (t.avatar) {
+    if (/^https?:\/\//.test(t.avatar)) {
+      $('#avatar').textContent = '';
+      $('#avatar').style.backgroundImage = 'url(' + t.avatar.replace(/'/g, "%27") + ')';
+    } else {
+      $('#avatar').textContent = t.avatar;
+    }
+  }
+  document.title = (t.brand || a.name || 'Чат') + ' — botme';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
+}
+
+function appendMessage(role, content, { raw = false } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-' + role;
+  if (role === 'assistant') {
+    const av = (assistant?.theme?.avatar) || '';
+    let avHtml = '';
+    if (/^https?:\/\//.test(av)) {
+      avHtml = `<div class="ai-avatar" style="background-image:url('${av.replace(/'/g, '%27')}')"></div>`;
+    } else if (av) {
+      avHtml = `<div class="ai-avatar">${escapeHtml(av)}</div>`;
+    } else {
+      avHtml = `<div class="ai-avatar">AI</div>`;
+    }
+    wrap.innerHTML = avHtml + `<div class="bubble">${raw ? content : escapeHtml(content)}</div>`;
+  } else {
+    wrap.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
+  }
+  $('#messages').appendChild(wrap);
+  scrollDown();
+  return wrap;
+}
+
+function scrollDown() {
+  const el = $('#messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+$('#composer').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#input');
+  const txt = input.value.trim();
+  if (!txt) return;
+  input.value = '';
+  $('#sendBtn').disabled = true;
+
+  appendMessage('user', txt);
+  const typingEl = appendMessage('assistant', '<span class="typing"><span></span><span></span><span></span></span>', { raw: true });
+  const bubble = typingEl.querySelector('.bubble');
+
+  let acc = '';
+  let lead = null;
+  let sources = [];
+  let convId = null;
+
+  try {
+    const r = await fetch(HOST + '/api/v1/chat?stream=1', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + TOKEN,
+        'X-Session-Id': SESSION_ID,
+      },
+      body: JSON.stringify({ message: txt, sessionId: SESSION_ID }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.message || j.error || ('HTTP ' + r.status));
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() || '';
+      for (const evt of events) {
+        const lines = evt.split('\n');
+        let event = 'message';
+        let data = '';
+        for (const ln of lines) {
+          if (ln.startsWith('event:')) event = ln.slice(6).trim();
+          else if (ln.startsWith('data:')) data += ln.slice(5).trim();
+        }
+        if (!data) continue;
+        let payload; try { payload = JSON.parse(data); } catch { continue; }
+        if (event === 'delta') {
+          if (acc === '') bubble.textContent = '';
+          acc += payload.text || '';
+          bubble.textContent = acc;
+          scrollDown();
+        } else if (event === 'done') {
+          sources = payload.sources || [];
+          lead = payload.lead || null;
+          convId = payload.conversation_id || null;
+        } else if (event === 'error') {
+          throw new Error(payload.message || 'stream error');
+        }
+      }
+    }
+
+    // Финальный рендер с sources
+    bubble.innerHTML = escapeHtml(acc) + renderSources(sources);
+
+    // Триггер лида
+    if (!leadOffered && lead && lead.shouldOffer) {
+      leadOffered = true;
+      offerLead(convId, lead.fields || ['name', 'phone']);
+    }
+  } catch (e) {
+    bubble.innerHTML = '<span style="color:#f87171;">Ошибка: ' + escapeHtml(e.message) + '</span>';
+  } finally {
+    $('#sendBtn').disabled = false;
+    $('#input').focus();
+  }
+});
+
+function renderSources(sources) {
+  if (!sources || !sources.length) return '';
+  const items = sources.map((s) =>
+    `<div class="source-item">📄 ${escapeHtml(s.title || 'документ')} <span style="opacity:.6">· ${(s.score || 0).toFixed(2)}</span></div>`
+  ).join('');
+  return `<div class="sources"><details><summary>📚 Использовано ${sources.length} фрагмент${sources.length === 1 ? '' : 'ов'}</summary>${items}</details></div>`;
+}
+
+function offerLead(conversationId, fields) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-assistant';
+  wrap.innerHTML = `
+    <div class="ai-avatar">AI</div>
+    <div class="lead-card flex-1">
+      <div class="text-[13px] font-medium mb-1">Оставьте контакты — мы свяжемся в ближайшее время.</div>
+      <form id="leadForm">
+        ${fields.includes('name')  ? '<input name="name"  placeholder="Ваше имя" />' : ''}
+        ${fields.includes('phone') ? '<input name="phone" placeholder="Телефон" />' : ''}
+        ${fields.includes('email') ? '<input name="email" placeholder="Email" type="email" />' : ''}
+        <button type="submit" style="margin-top:8px;width:100%;padding:9px;border:none;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:white;font-weight:600;cursor:pointer;">Отправить</button>
+        <div id="leadStatus" style="font-size:11px;color:#8a93a6;margin-top:6px;"></div>
+      </form>
+    </div>`;
+  $('#messages').appendChild(wrap);
+  scrollDown();
+
+  wrap.querySelector('#leadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      name: fd.get('name')  || '',
+      phone: fd.get('phone') || '',
+      email: fd.get('email') || '',
+      conversationId,
+    };
+    if (!payload.name && !payload.phone && !payload.email) {
+      wrap.querySelector('#leadStatus').textContent = 'Заполните хотя бы одно поле';
+      return;
+    }
+    try {
+      const r = await fetch(HOST + '/api/v1/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + TOKEN,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      wrap.querySelector('#leadForm').innerHTML =
+        '<div style="color:#22c55e;font-size:13px;text-align:center;padding:6px;">✓ Спасибо! Мы скоро свяжемся.</div>';
+    } catch (err) {
+      wrap.querySelector('#leadStatus').textContent = 'Ошибка: ' + err.message;
+    }
+  });
+}
+
+$('#closeBtn').addEventListener('click', () => {
+  parent && parent.postMessage({ source: 'botme-widget', type: 'close' }, '*');
+});
+
+function lighten(hex, amount) {
+  const h = hex.replace('#', '');
+  const f = (i) => Math.min(255, Math.round(parseInt(h.substr(i, 2), 16) + 255 * amount));
+  return '#' + [f(0), f(2), f(4)].map((n) => n.toString(16).padStart(2, '0')).join('');
+}
+</script>
+</body>
+</html>

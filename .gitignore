@@ -1,0 +1,30 @@
+# Зависимости
+node_modules/
+
+# Секреты
+.env
+.env.local
+.env.production
+
+# Локальные данные runtime
+projects/
+data/
+
+# Логи и системное
+*.log
+npm-debug.log*
+yarn-debug.log*
+.DS_Store
+Thumbs.db
+
+# Временные файлы тестирования
+.test-*.txt
+.test-*.json
+.test-payload.json
+
+# IDE
+.vscode/
+.idea/
+
+# PM2
+.pm2/

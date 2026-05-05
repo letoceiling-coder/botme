@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Site Builder — чат-агент для генерации сайтов и игр</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg:      '#0b0d12',
+          panel:   '#11141b',
+          panel2:  '#161a23',
+          border:  '#222836',
+          text:    '#e6e8ee',
+          muted:   '#8a93a6',
+          brand:   '#7c5cff',
+          brand2:  '#22d3ee',
+          ok:      '#22c55e',
+          err:     '#ef4444',
+        },
+      },
+    },
+  };
+</script>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-bg text-text antialiased h-screen overflow-hidden">
+
+<div class="flex h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[320px] shrink-0 bg-panel border-r border-border flex flex-col">
+
+    <!-- Header -->
+    <div class="p-4 border-b border-border flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-brand2 flex items-center justify-center font-bold text-white shadow-lg">AI</div>
+      <div>
+        <div class="font-semibold leading-tight">Site Builder</div>
+        <div class="text-xs text-muted">чат-агент для сайтов и игр</div>
+      </div>
+    </div>
+
+    <!-- Кнопка нового чата -->
+    <div class="p-3 border-b border-border">
+      <button id="newChatBtn"
+        class="w-full px-3 py-2 rounded-lg bg-brand hover:bg-brand/90 text-white text-sm font-medium transition flex items-center justify-center gap-2">
+        <span class="text-lg leading-none">+</span> Новый проект
+      </button>
+    </div>
+
+    <!-- Выбор модели -->
+    <div class="p-3 border-b border-border">
+      <label class="block text-xs uppercase tracking-wider text-muted mb-1.5">Модель</label>
+      <select id="modelSelect"
+        class="w-full bg-panel2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/50">
+      </select>
+      <div id="modelHint" class="text-[11px] text-muted mt-1.5">Выбери провайдера и модель.</div>
+    </div>
+
+    <!-- Список проектов -->
+    <div class="px-3 pt-3 pb-1 text-xs uppercase tracking-wider text-muted">История проектов</div>
+    <div id="projectList" class="flex-1 overflow-y-auto px-2 pb-3 space-y-1">
+      <div class="text-xs text-muted px-3 py-4 text-center">Пока пусто</div>
+    </div>
+
+    <!-- Footer -->
+    <div class="p-3 border-t border-border space-y-2">
+      <a href="/assistant/"
+        class="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-brand/30 to-brand2/20 hover:from-brand/40 hover:to-brand2/30 border border-brand/40 text-sm flex items-center justify-center gap-2 transition">
+        🤖 AI-Ассистенты &amp; RAG →
+      </a>
+      <button id="statsBtn"
+        class="w-full px-3 py-2 rounded-lg bg-panel2 hover:bg-panel2/70 border border-border hover:border-brand/50 text-sm flex items-center justify-center gap-2 transition">
+        📊 Статистика токенов
+      </button>
+      <div class="text-[11px] text-muted">
+        Файлы: <span class="text-text/80">/projects/&lt;id&gt;/index.html</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 flex min-w-0">
+
+    <!-- Чат -->
+    <section class="w-[440px] shrink-0 flex flex-col bg-panel border-r border-border">
+      <div class="p-3 border-b border-border flex items-center justify-between">
+        <div class="min-w-0">
+          <div id="chatTitle" class="text-sm font-medium truncate">Новый проект</div>
+          <div id="chatSub" class="text-[11px] text-muted truncate">Опиши, что построить</div>
+        </div>
+        <button id="openPreviewBtn"
+          class="text-xs px-2.5 py-1.5 rounded-md bg-panel2 border border-border hover:border-brand/50 text-text/90 hidden">
+          Открыть в новой вкладке ↗
+        </button>
+      </div>
+
+      <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+
+      <form id="chatForm" class="p-3 border-t border-border">
+        <div id="quickPrompts" class="flex flex-wrap gap-1.5 mb-2"></div>
+        <div class="flex flex-col gap-2 bg-panel2 border border-border rounded-xl p-2 focus-within:border-brand/60 transition">
+          <textarea id="prompt" rows="3"
+            placeholder="Опиши идею детально. Например: «Премиум лендинг для натяжных потолков в Воронеже: hero с фоновым фото интерьера, калькулятор цены, галерея до/после, отзывы, форма заявки, тёмная тема + золотой акцент»"
+            class="w-full bg-transparent resize-none outline-none text-sm placeholder:text-muted"></textarea>
+          <div class="flex items-center justify-between gap-2">
+            <div id="status" class="text-[11px] text-muted truncate">Готов</div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button id="improveBtn" type="button" title="Улучшить промпт через AI (Claude Haiku)"
+                class="px-3 py-1.5 rounded-lg bg-panel border border-border hover:border-brand/50 text-text/90 text-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
+                ✨ Улучшить
+              </button>
+              <button id="sendBtn" type="submit"
+                class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-brand to-brand2 text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Отправить ⏎
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="text-[11px] text-muted mt-2">
+          Ctrl/Cmd + Enter — отправить.&nbsp; ✨ — переписать промпт в премиум-вариант.
+        </div>
+      </form>
+    </section>
+
+    <!-- Превью -->
+    <section class="flex-1 flex flex-col min-w-0 bg-panel2">
+      <div class="p-3 border-b border-border flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2 min-w-0 flex-1">
+          <div class="flex gap-1.5 shrink-0">
+            <span class="w-3 h-3 rounded-full bg-err/70"></span>
+            <span class="w-3 h-3 rounded-full bg-yellow-500/70"></span>
+            <span class="w-3 h-3 rounded-full bg-ok/70"></span>
+          </div>
+          <select id="pageSelect"
+            class="hidden bg-panel border border-border rounded-md text-xs px-2 py-1 max-w-[180px] focus:outline-none focus:border-brand/50"></select>
+          <div id="previewUrl" class="ml-1 px-3 py-1 rounded-md bg-panel border border-border text-xs text-muted truncate min-w-0 flex-1">
+            preview
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span id="filesBadge" class="hidden text-[11px] px-2 py-1 rounded-md bg-panel border border-border text-muted" title="Файлов в проекте"></span>
+          <button id="reloadPreview" class="text-xs px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50">
+            ↻ Обновить
+          </button>
+          <button id="downloadHtml" class="text-xs px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 hidden">
+            ⬇ Скачать .html
+          </button>
+        </div>
+      </div>
+
+      <div id="previewWrap" class="flex-1 relative">
+        <div id="previewEmpty" class="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
+          <div class="text-5xl mb-4">🎮</div>
+          <div class="text-lg font-medium mb-2">Здесь появится твой сайт или игра</div>
+          <div class="text-sm text-muted max-w-md">
+            Напиши запрос в чате слева. Например:<br>
+            <span class="text-text/80">«Сделай космическую стрелялку на canvas с врагами и счётом»</span>
+          </div>
+        </div>
+        <iframe id="preview" class="w-full h-full hidden bg-white" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-forms"></iframe>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===================== Модалка: Статистика токенов ===================== -->
+<div id="statsModal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-panel border border-border rounded-2xl w-full max-w-4xl max-h-[88vh] overflow-hidden flex flex-col shadow-2xl">
+    <div class="p-4 border-b border-border flex items-center justify-between">
+      <div>
+        <div class="text-lg font-semibold">📊 Статистика токенов</div>
+        <div class="text-xs text-muted mt-0.5">Использование моделей по задачам и проектам</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="resetStatsBtn" class="text-xs px-2.5 py-1.5 rounded-md bg-panel2 border border-border hover:border-err/50 hover:text-err">
+          Сбросить
+        </button>
+        <button id="closeStatsBtn" class="w-8 h-8 rounded-md bg-panel2 border border-border hover:border-brand/50 text-lg leading-none">
+          ×
+        </button>
+      </div>
+    </div>
+    <div id="statsBody" class="overflow-y-auto p-5 space-y-6 text-sm">
+      <div class="text-center text-muted py-12">Загрузка…</div>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
