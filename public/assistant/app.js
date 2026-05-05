@@ -306,11 +306,77 @@ $('#chatForm').addEventListener('submit', async (e) => {
     const sourcesHtml = renderSources(r.retrieval?.hits || []);
     const meta = renderMessageMeta(r);
     typingEl.querySelector('.bubble').innerHTML = escapeHtml(r.text) + sourcesHtml + meta;
+
+    // Если триггер лида сработал — показываем inline-форму прямо в чате
+    if (r.lead?.shouldOffer) {
+      renderInlineLeadForm(r.lead.fields || ['name', 'phone'], r.conversationId);
+    }
   } catch (e) {
     typingEl.querySelector('.bubble').innerHTML = `<span class="text-err">Ошибка: ${escapeHtml(e.message)}</span>`;
   }
   scrollChatToBottom();
 });
+
+// Inline-форма лида внутри админ-чата (для теста flow без виджета)
+function renderInlineLeadForm(fields, conversationId) {
+  // Не показываем повторно, если форма уже висит ниже последнего сообщения
+  const last = $('#chatMsgs').lastElementChild;
+  if (last && last.classList.contains('lead-inline')) return;
+
+  const fieldLabels = { name: 'Имя', phone: 'Телефон', email: 'Email', telegram: 'Telegram', message: 'Описание' };
+  const fieldTypes  = { name: 'text', phone: 'tel', email: 'email', telegram: 'text', message: 'text' };
+
+  const wrap = document.createElement('div');
+  wrap.className = 'lead-inline';
+  wrap.innerHTML = `
+    <div class="lead-inline-head">
+      <div class="lead-inline-icon">📋</div>
+      <div>
+        <div class="lead-inline-title">Контакт для менеджера</div>
+        <div class="lead-inline-sub">Заполни форму — это сохранится как лид и видно во вкладке «Лиды».</div>
+      </div>
+    </div>
+    <form class="lead-inline-form">
+      ${fields.map((f) => `
+        <input name="${f}" type="${fieldTypes[f] || 'text'}" placeholder="${fieldLabels[f] || f}"
+          class="lead-inline-input" ${f === 'name' || f === 'phone' ? 'required' : ''} />
+      `).join('')}
+      <input name="message" type="text" placeholder="Что нужно? (опционально)" class="lead-inline-input" />
+      <div class="lead-inline-actions">
+        <button type="button" class="lead-inline-cancel">Не сейчас</button>
+        <button type="submit" class="lead-inline-submit">Сохранить лид</button>
+      </div>
+      <div class="lead-inline-status"></div>
+    </form>
+  `;
+  $('#chatMsgs').appendChild(wrap);
+  scrollChatToBottom();
+
+  wrap.querySelector('.lead-inline-cancel').addEventListener('click', () => wrap.remove());
+  wrap.querySelector('.lead-inline-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = { conversationId };
+    for (const [k, v] of fd.entries()) if (v) payload[k] = v;
+    const status = wrap.querySelector('.lead-inline-status');
+    status.textContent = 'Сохраняем…';
+    try {
+      const r = await fetch(`/api/assistants/${ASSISTANT_ID}/leads`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || ('HTTP ' + r.status));
+      }
+      status.innerHTML = '<span class="lead-inline-ok">✓ Лид сохранён</span>';
+      wrap.querySelectorAll('input, button').forEach((b) => b.disabled = true);
+      setTimeout(() => wrap.remove(), 2500);
+    } catch (err) {
+      status.innerHTML = `<span class="text-err">Ошибка: ${escapeHtml(err.message)}</span>`;
+    }
+  });
+}
 
 function appendMessage(role, content, { raw = false } = {}) {
   const wrap = document.createElement('div');

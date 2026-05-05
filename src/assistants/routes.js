@@ -91,6 +91,10 @@ const sql = {
 
   listLeads: db.prepare(`SELECT * FROM leads WHERE assistant_id = ? ORDER BY created_at DESC`),
   deleteLead: db.prepare(`DELETE FROM leads WHERE id = ? AND assistant_id = ?`),
+  insertLead: db.prepare(`
+    INSERT INTO leads (id, assistant_id, conversation_id, name, email, phone, message, meta_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
 
   statsByDay:    db.prepare(`SELECT day, SUM(calls) AS calls, SUM(input) AS input, SUM(output) AS output, SUM(total) AS total FROM assistant_stats WHERE assistant_id = ? GROUP BY day ORDER BY day DESC LIMIT 30`),
   statsByModel:  db.prepare(`SELECT model, SUM(calls) AS calls, SUM(input) AS input, SUM(output) AS output, SUM(total) AS total FROM assistant_stats WHERE assistant_id = ? GROUP BY model ORDER BY total DESC`),
@@ -541,6 +545,27 @@ router.get('/:id/conversations/:cid', (req, res) => {
 router.get('/:id/leads', (req, res) => {
   if (!sql.getAssistant.get(req.params.id)) return res.status(404).json({ error: 'not found' });
   res.json(sql.listLeads.all(req.params.id));
+});
+
+// Создание лида из админ-чата (для теста flow без виджета)
+// POST /:id/leads { conversationId?, name, email?, phone?, message? }
+router.post('/:id/leads', (req, res) => {
+  if (!sql.getAssistant.get(req.params.id)) return res.status(404).json({ error: 'not found' });
+  const { conversationId, name, email, phone, message, meta } = req.body || {};
+  if (!name && !email && !phone) {
+    return res.status(400).json({ error: 'нужно указать хотя бы имя, email или телефон' });
+  }
+  const id = randomUUID();
+  sql.insertLead.run(
+    id, req.params.id, conversationId || null,
+    (name || '').slice(0, 200) || null,
+    (email || '').slice(0, 200) || null,
+    (phone || '').slice(0, 80) || null,
+    (message || '').slice(0, 4000) || null,
+    meta ? JSON.stringify(meta) : null,
+    now(),
+  );
+  res.json({ ok: true, id });
 });
 
 router.delete('/:id/leads/:leadId', (req, res) => {
