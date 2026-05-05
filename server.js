@@ -11,12 +11,18 @@ import { getModelsMerged, callWithFallback, recordUsage, readGeneratorStats, res
 import assistantsRouter from './src/assistants/routes.js';
 import publicApiRouter from './src/public-api/routes.js';
 import agentChatRouter from './src/agent-chat/routes.js';
+import session from 'express-session';
+import authRouter from './src/auth/routes.js';
+import { appAuthGate } from './src/auth/middleware.js';
+import { seedDefaultAppUser } from './src/auth/seed-users.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3001;
 const PROJECTS_DIR = path.join(__dirname, 'projects');
+
+const SESSION_SECRET = process.env.SESSION_SECRET || 'botme-dev-insecure-change-me';
 
 await fs.mkdir(PROJECTS_DIR, { recursive: true });
 
@@ -438,8 +444,31 @@ async function listProjects() {
 // HTTP сервер
 // =============================================================
 const app = express();
-app.use(cors());
+app.set('trust proxy', 1);
+
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '20mb' }));
+
+app.use(session({
+  name: 'botme.sid',
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+  },
+}));
+
+seedDefaultAppUser();
+
+app.use('/api/auth', authRouter);
+
+app.use(appAuthGate);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Превью сгенерированного сайта (главный index.html + любые подфайлы)

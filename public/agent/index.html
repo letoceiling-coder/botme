@@ -69,6 +69,10 @@
         class="block w-full text-center px-3 py-2 rounded-lg bg-gradient-to-r from-brand/20 to-brand2/15 hover:from-brand/30 border border-brand/30 text-sm transition">
         ← Site Builder
       </a>
+      <button type="button" onclick="logoutBotme()"
+        class="w-full px-3 py-2 rounded-lg bg-panel2 hover:bg-panel2/70 border border-border hover:border-err/40 text-sm text-muted hover:text-err transition">
+        Выйти
+      </button>
     </div>
   </aside>
 
@@ -97,6 +101,7 @@
   </main>
 </div>
 
+<script src="/auth-fetch.js"></script>
 <script>
 const HOST = location.origin;
 const $ = (s) => document.querySelector(s);
