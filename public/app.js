@@ -178,6 +178,61 @@ function buildErrorBubble(err, primaryModel) {
   return wrap;
 }
 
+/** Пузырь «модель вернула битый проект (Vite-скелет / нет файлов)» с кнопками. */
+function buildBrokenProjectBubble(res, primaryModel) {
+  const missing = Array.isArray(res?.missingFiles) ? res.missingFiles.slice(0, 6) : [];
+  const scaffold = res?.scaffoldKind ? `${res.scaffoldKind}-скелет` : 'битый проект';
+  const explainTop = res?.scaffoldKind
+    ? `Модель вернула ${scaffold}: index.html ссылается на локальные файлы, которых нет в ответе. Превью таких сайтов всегда пустое.`
+    : 'В проекте есть ссылки на локальные файлы, которых модель не приложила. Превью может работать частично.';
+  const missingBlock = missing.length
+    ? `<div class="text-[11px] text-muted mt-2">Не хватает: ${missing.map((m) => `<code>${escapeHtml(m)}</code>`).join(', ')}</div>`
+    : '';
+  // Альтернативные модели — берём топ из выбранного списка, кроме текущего primary.
+  const alternativeIds = (state.models || [])
+    .map((m) => m.id)
+    .filter((id) => id !== primaryModel)
+    .slice(0, 3);
+  const altButtons = alternativeIds.length
+    ? `<div class="flex flex-wrap gap-2 mt-3">
+        <button type="button" class="retry-broken-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">↻ Сгенерировать заново</button>
+        ${alternativeIds.map((id) => `<button type="button" class="alt-model-btn px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 text-xs" data-model="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join('')}
+      </div>`
+    : `<div class="flex flex-wrap gap-2 mt-3">
+        <button type="button" class="retry-broken-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">↻ Сгенерировать заново</button>
+      </div>`;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-assistant';
+  wrap.innerHTML = `
+    <div class="avatar avatar-ai">!</div>
+    <div class="bubble" style="border-color: rgba(251,191,36,0.55);">
+      <div class="text-sm font-semibold text-yellow-300">Превью пустое — модель вернула неработающий шаблон</div>
+      <div class="text-xs text-text/90 mt-1.5">${escapeHtml(explainTop)}</div>
+      ${missingBlock}
+      ${altButtons}
+      ${primaryModel ? `<div class="text-[11px] text-muted mt-2">Запрос был к: <span class="text-text/90">${escapeHtml(primaryModel)}</span>${res?.retried ? ' · авто-ретрай уже выполнен' : ''}</div>` : ''}
+    </div>`;
+  els.messages.appendChild(wrap);
+  els.messages.scrollTop = els.messages.scrollHeight;
+
+  wrap.querySelector('.retry-broken-btn')?.addEventListener('click', () => {
+    if (state.busy) return;
+    sendPrompt();
+  });
+  wrap.querySelectorAll('.alt-model-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      const id = b.dataset.model;
+      if (id) {
+        els.modelSelect.value = id;
+        flashStatus(`Переключил модель на ${id}`, 'loading');
+        if (!state.busy) sendPrompt();
+      }
+    });
+  });
+  return wrap;
+}
+
 // =============================================================
 // Init
 // =============================================================
@@ -568,10 +623,19 @@ async function sendPrompt(prefilledPrompt) {
     const pu = res.projectUsage || { calls: 0, total: 0 };
     const filesNote = (res.files && res.files.length > 1) ? ` • ${res.files.length} файлов` : '';
     els.chatSub.textContent = `id: ${res.id.slice(0, 8)} • ${res.modelUsed || res.model} • ${pu.calls} вызовов, ${pu.total.toLocaleString('ru-RU')} токенов${filesNote}`;
-    if (res.hasHtml) showPreview(res.id, res.files || ['index.html']);
+    if (res.hasHtml && !res.brokenProject) {
+      showPreview(res.id, res.files || ['index.html']);
+    } else if (res.brokenProject) {
+      hidePreview();
+      buildBrokenProjectBubble(res, model);
+    }
     await loadProjects();
     const fb = res.fallbackFrom ? ` (fallback с ${res.fallbackFrom})` : '';
-    els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage.total} токенов${fb}`;
+    if (res.brokenProject) {
+      els.status.innerHTML = `<span class="dot err"></span>проект битый · повторите или смените модель`;
+    } else {
+      els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage.total} токенов${fb}`;
+    }
   } catch (e) {
     removeAssistantLoadingBubble(loadingEl);
     buildErrorBubble(e, model);
