@@ -98,10 +98,84 @@ async function api(path, opts = {}) {
     ...opts,
   });
   if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    throw new Error(`${r.status} ${r.statusText} ${text}`);
+    let payload = null;
+    try { payload = await r.clone().json(); } catch { /* not json */ }
+    const message = payload?.error || (await r.text().catch(() => `${r.status} ${r.statusText}`));
+    const err = new Error(message || `${r.status} ${r.statusText}`);
+    err.status = r.status;
+    err.code = payload?.code || null;
+    err.errors = payload?.errors;
+    err.suggestedAlternatives = payload?.suggestedAlternatives;
+    throw err;
   }
   return r.json();
+}
+
+const ERROR_KIND_RU = {
+  auth: 'Ключ API провайдера не настроен или недействителен. Это решается в .env на сервере.',
+  quota: 'Закончился баланс или квота у провайдера. Пополните баланс или выберите другую модель.',
+  rate_limit: 'Превышен лимит запросов в минуту у провайдера. Попробуйте через 30–60 секунд или выберите другую модель.',
+  overloaded: 'Сервис провайдера перегружен. Попробуйте ещё раз или выберите другую модель.',
+  bad_request: 'Провайдер отклонил запрос. Попробуйте упростить промпт или сменить модель.',
+  not_found: 'Эта модель сейчас недоступна у провайдера. Выберите другую из списка.',
+  context_overflow: 'Запрос слишком большой для модели. Сократите контекст или выберите модель с большим окном.',
+  content_filter: 'Запрос отклонён фильтром безопасности. Переформулируйте идею.',
+  network: 'Сетевая ошибка между сервером и провайдером. Повторите попытку.',
+  timeout: 'Модель не успела ответить за отведённое время. Повторите попытку или выберите более быструю модель.',
+  aborted: 'Запрос был отменён.',
+  no_models: 'Не настроен ни один ключ провайдера на сервере (.env: ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY).',
+  unknown: 'Произошла ошибка при обращении к модели.',
+};
+
+function buildErrorBubble(err, primaryModel) {
+  const code = err?.code || 'unknown';
+  const explain = ERROR_KIND_RU[code] || ERROR_KIND_RU.unknown;
+  const trail = Array.isArray(err?.errors) && err.errors.length
+    ? err.errors.slice(-3).map((it) =>
+        `• ${escapeHtml(it.model || '?')}${it.status ? ` [${it.status}]` : ''}: ${escapeHtml((it.message || it.raw || it.kind || '').toString().slice(0, 220))}`,
+      ).join('<br>')
+    : '';
+  const alts = Array.isArray(err?.suggestedAlternatives) ? err.suggestedAlternatives : [];
+  const altButtons = alts.length
+    ? alts.slice(0, 3).map((a) =>
+        `<button type="button" class="alt-model-btn px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 text-xs" data-model="${escapeHtml(a.id)}">${escapeHtml(a.label || a.id)}</button>`
+      ).join('')
+    : '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-assistant';
+  wrap.innerHTML = `
+    <div class="avatar avatar-ai">!</div>
+    <div class="bubble" style="border-color: rgba(239,68,68,0.45);">
+      <div class="text-sm font-semibold text-err">Не удалось получить ответ от модели</div>
+      <div class="text-xs text-text/90 mt-1.5">${escapeHtml(explain)}</div>
+      ${trail ? `<div class="text-[11px] text-muted mt-2 leading-relaxed">${trail}</div>` : ''}
+      <div class="flex flex-wrap gap-2 mt-3">
+        <button type="button" class="retry-prompt-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">
+          ↻ Повторить
+        </button>
+        ${altButtons}
+      </div>
+      ${primaryModel ? `<div class="text-[11px] text-muted mt-2">Запрос был к: <span class="text-text/90">${escapeHtml(primaryModel)}</span></div>` : ''}
+    </div>`;
+  els.messages.appendChild(wrap);
+  els.messages.scrollTop = els.messages.scrollHeight;
+
+  wrap.querySelector('.retry-prompt-btn')?.addEventListener('click', () => {
+    if (state.busy) return;
+    sendPrompt();
+  });
+  wrap.querySelectorAll('.alt-model-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      const id = b.dataset.model;
+      if (id) {
+        els.modelSelect.value = id;
+        flashStatus(`Переключил модель на ${id}`, 'loading');
+        if (!state.busy) sendPrompt();
+      }
+    });
+  });
+  return wrap;
 }
 
 // =============================================================
@@ -438,9 +512,18 @@ function hidePreview() {
 // =============================================================
 // Send prompt
 // =============================================================
-async function sendPrompt() {
+async function sendPrompt(prefilledPrompt) {
   if (state.busy) return;
-  const prompt = els.prompt.value.trim();
+  // Если повторяем после ошибки — берём последний user-промпт.
+  let prompt;
+  if (typeof prefilledPrompt === 'string' && prefilledPrompt.trim()) {
+    prompt = prefilledPrompt.trim();
+  } else if (els.prompt.value.trim()) {
+    prompt = els.prompt.value.trim();
+  } else {
+    const lastUser = [...state.currentMessages].reverse().find((m) => m.role === 'user');
+    prompt = lastUser?.content || '';
+  }
   if (!prompt) return;
   const model = els.modelSelect.value;
 
@@ -457,10 +540,14 @@ async function sendPrompt() {
   tickGenStatus();
   statusTickerId = setInterval(tickGenStatus, 1000);
 
-  // Сразу отрисовываем сообщение пользователя + индикатор загрузки
+  // Сразу отрисовываем сообщение пользователя + индикатор загрузки.
+  // При повторе того же промпта — не дублируем user-сообщение.
   if (state.currentMessages.length === 0) els.messages.innerHTML = '';
-  state.currentMessages.push({ role: 'user', content: prompt });
-  addMessageToDOM('user', prompt);
+  const lastUser = [...state.currentMessages].reverse().find((m) => m.role === 'user');
+  if (!lastUser || lastUser.content !== prompt) {
+    state.currentMessages.push({ role: 'user', content: prompt });
+    addMessageToDOM('user', prompt);
+  }
   els.prompt.value = '';
   const loadingEl = addLoadingMessage(GENERATION_WAIT_HINTS);
 
@@ -487,8 +574,9 @@ async function sendPrompt() {
     els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage.total} токенов${fb}`;
   } catch (e) {
     removeAssistantLoadingBubble(loadingEl);
-    addMessageToDOM('assistant', `❌ Ошибка: ${e.message}`);
-    els.status.innerHTML = `<span class="dot err"></span>ошибка`;
+    buildErrorBubble(e, model);
+    const code = e?.code || 'error';
+    els.status.innerHTML = `<span class="dot err"></span>${escapeHtml(code)} · попробуйте повторить или сменить модель`;
   } finally {
     clearStatusTicker();
     state.busy = false;

@@ -657,7 +657,12 @@ app.post('/api/generate', async (req, res) => {
     });
   } catch (e) {
     console.error('[generate]', e);
-    res.status(500).json({ error: e?.message || String(e) });
+    res.status(502).json({
+      error: e?.userMessage || e?.message || String(e),
+      code: e?.code || 'unknown',
+      errors: Array.isArray(e?.errors) ? e.errors.slice(-5) : undefined,
+      suggestedAlternatives: e?.suggestedAlternatives,
+    });
   }
 });
 
@@ -691,7 +696,12 @@ app.post('/api/improve-prompt', async (req, res) => {
     });
   } catch (e) {
     console.error('[improve-prompt]', e);
-    res.status(500).json({ error: e?.message || String(e) });
+    res.status(502).json({
+      error: e?.userMessage || e?.message || String(e),
+      code: e?.code || 'unknown',
+      errors: Array.isArray(e?.errors) ? e.errors.slice(-5) : undefined,
+      suggestedAlternatives: e?.suggestedAlternatives,
+    });
   }
 });
 

@@ -215,7 +215,11 @@ $('#chatForm').addEventListener('submit', async (e) => {
         body: JSON.stringify(bodyPayload()),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || j.message || 'HTTP ' + r.status);
+      if (!r.ok) {
+        const e = new Error(j.error || j.message || 'HTTP ' + r.status);
+        e.code = j.code; e.suggestedAlternatives = j.suggestedAlternatives; e.errors = j.errors;
+        throw e;
+      }
       const text = j.text || '';
       messages.push({ role: 'assistant', content: text });
       bubble.textContent = '';
@@ -233,7 +237,9 @@ $('#chatForm').addEventListener('submit', async (e) => {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || j.message || 'HTTP ' + r.status);
+      const e = new Error(j.error || j.message || 'HTTP ' + r.status);
+      e.code = j.code; e.suggestedAlternatives = j.suggestedAlternatives; e.errors = j.errors;
+      throw e;
     }
 
     let acc = '';
@@ -267,13 +273,41 @@ $('#chatForm').addEventListener('submit', async (e) => {
           const u = payload.usage || {};
           setStatus(`Модель: ${payload.model_used || model}${fb} · токенов: ${u.total ?? '—'}`);
         } else if (event === 'error') {
-          throw new Error(payload.message || 'stream error');
+          const e = new Error(payload.message || 'stream error');
+          e.code = payload.code;
+          e.streamPartial = !!payload.streamPartial;
+          throw e;
         }
       }
     }
     messages.push({ role: 'assistant', content: acc });
   } catch (err) {
-    bubble.innerHTML = '<span class="text-red-400">' + escapeHtml(err.message) + '</span>';
+    const code = err?.code || 'error';
+    const explainMap = {
+      auth: 'Ключ API провайдера не настроен или недействителен.',
+      quota: 'Закончился баланс/квота у провайдера. Пополните баланс или выберите другую модель.',
+      rate_limit: 'Превышен лимит запросов в минуту. Подождите 30–60 секунд или выберите другую модель.',
+      overloaded: 'Сервис провайдера перегружен. Повторите попытку или выберите другую модель.',
+      timeout: 'Модель не успела ответить. Повторите попытку или выберите более быструю модель.',
+      network: 'Сбой сети при обращении к провайдеру. Попробуйте ещё раз.',
+      no_models: 'Не настроен ни один ключ провайдера на сервере.',
+    };
+    const altList = Array.isArray(err.suggestedAlternatives) ? err.suggestedAlternatives.slice(0, 3) : [];
+    const altHtml = altList.length
+      ? '<div class="mt-2 flex flex-wrap gap-1">' + altList.map((a) =>
+          `<button data-alt="${escapeHtml(a.id)}" class="alt-btn text-[11px] px-2 py-1 rounded bg-panel border border-border hover:border-brand/50">${escapeHtml(a.label || a.id)}</button>`,
+        ).join('') + '</div>'
+      : '';
+    bubble.innerHTML =
+      '<div class="text-red-400 text-sm font-medium">Не удалось получить ответ</div>'
+      + '<div class="text-xs text-muted mt-1">' + escapeHtml(explainMap[code] || err.message || 'Произошла ошибка') + '</div>'
+      + altHtml;
+    bubble.querySelectorAll('.alt-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.alt;
+        if (id) { $('#modelSelect').value = id; }
+      });
+    });
   } finally {
     $('#sendBtn').disabled = false;
     input.focus();

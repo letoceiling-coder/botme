@@ -388,7 +388,12 @@ router.post('/:id/documents/generate', async (req, res) => {
     });
   } catch (e) {
     console.error('[kb-generate]', e);
-    res.status(500).json({ error: e.message });
+    res.status(502).json({
+      error: e?.userMessage || e?.message || String(e),
+      code: e?.code || 'unknown',
+      errors: Array.isArray(e?.errors) ? e.errors.slice(-5) : undefined,
+      suggestedAlternatives: e?.suggestedAlternatives,
+    });
   }
 });
 
@@ -518,14 +523,25 @@ router.post('/:id/chat', async (req, res) => {
         lead: r.lead,
       });
     } catch (e) {
-      send('error', { message: e.message });
+      send('error', {
+        message: e?.userMessage || e?.message || String(e),
+        code: e?.code || 'unknown',
+        streamPartial: !!e?.streamPartial,
+      });
     } finally {
       clearInterval(keep);
       res.end();
     }
   } catch (e) {
     console.error('[chat]', e);
-    if (!res.headersSent) res.status(500).json({ error: e.message });
+    if (!res.headersSent) {
+      res.status(502).json({
+        error: e?.userMessage || e?.message || String(e),
+        code: e?.code || 'unknown',
+        errors: Array.isArray(e?.errors) ? e.errors.slice(-5) : undefined,
+        suggestedAlternatives: e?.suggestedAlternatives,
+      });
+    }
   }
 });
 
