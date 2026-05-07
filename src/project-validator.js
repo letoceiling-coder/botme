@@ -108,6 +108,12 @@ function collapsePath(p) {
   return out.join('/');
 }
 
+/** Контент стартового App.tsx из builder/template (ещё не реализован UI по запросу). */
+export function isReactBundleAppPlaceholder(text) {
+  if (!text || typeof text !== 'string') return false;
+  return /Шаблон react-bundle/.test(text) && /Здесь стартует ваше React-приложение/.test(text);
+}
+
 /** Исходники, которые собирает esbuild: import from 'react' ≠ отсутствующий файл в проекте. */
 export function isBundlerManagedSource(normName) {
   return /^src\/.+\.(tsx|ts|jsx|js|cjs|mjs)$/i.test(normName);
@@ -142,9 +148,7 @@ export function validateProjectIntegrity(files) {
     if (!/\.(html?|jsx?|tsx?|css|mjs|cjs)$/i.test(name)) continue;
     const text = content || '';
     const normName = String(name).replace(/\\/g, '/');
-    if (/^src\/App\.tsx$/i.test(normName)
-      && /Шаблон react-bundle/.test(text)
-      && /Здесь стартует ваше React-приложение/.test(text)) {
+    if (/^src\/App\.tsx$/i.test(normName) && isReactBundleAppPlaceholder(text)) {
       reactBundlePlaceholder = true;
     }
 
