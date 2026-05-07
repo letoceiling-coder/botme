@@ -36,7 +36,8 @@ function buildCoderSystemPrompt({ siteSystemPrompt, brief, plan, mode = 'fresh',
     : plan?.kind === 'react-bundle'
       ? `Ты — Coder. Это уже развёрнутый **react-bundle** (esbuild + PostCSS Tailwind в template): есть src/App.tsx, main.tsx, index.html для dist.
 Твоя задача — реализовать запрос пользователя **в коде**: перепиши src/App.tsx (и при нужде добавь файлы под src/).
-**ЗАПРЕЩЕНО** оставлять текст «Шаблон react-bundle» и абзац-заглушку про «Здесь стартует ваше React-приложение». Это брак.` 
+**ЗАПРЕЩЕНО** оставлять заголовок «Шаблон react-bundle», бейдж «React + Tailwind…esbuild» и заглушку «Здесь стартует…» / «Замените содержимое src/App.tsx». Это брак.
+Если в ПЛАНЕ (notes) указано «[Платформа]» или пользователь просил PostgreSQL/Fastify/настоящий WS-сервер — **не создавай отдельный backend**; весь тираж, боты и экономика — в этом браузерном приложении (при сложном state используй zustand из зависимостей шаблона).` 
       : `Ты — Coder. Создай проект с нуля в виде набора файлов на диске через write_file. Главный файл — index.html в корне проекта.`;
 
   const filesNote = existingFiles.length

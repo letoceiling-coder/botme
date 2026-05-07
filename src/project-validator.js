@@ -111,7 +111,15 @@ function collapsePath(p) {
 /** Контент стартового App.tsx из builder/template (ещё не реализован UI по запросу). */
 export function isReactBundleAppPlaceholder(text) {
   if (!text || typeof text !== 'string') return false;
-  return /Шаблон react-bundle/.test(text) && /Здесь стартует ваше React-приложение/.test(text);
+  // Любая из фирменных строк шаблона = всё ещё заглушка (модель может убрать только часть текста).
+  if (/Шаблон react-bundle/i.test(text)) return true;
+  if (
+    /React\s*\+\s*Tailwind[^\n]{0,120}esbuild/i.test(text)
+    && (/Здесь стартует/i.test(text) || /Замените содержимое/i.test(text))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Исходники, которые собирает esbuild: import from 'react' ≠ отсутствующий файл в проекте. */
@@ -242,7 +250,7 @@ export function describeIntegrity(report) {
     parts.push(`HTML обрезан (нет </html>) в ${report.truncatedHtml.join(', ')}`);
   }
   if (report.reactBundlePlaceholder) {
-    parts.push('react-bundle: в src/App.tsx остался стартовый шаблон («Шаблон react-bundle») — основной UI не заменён');
+    parts.push('react-bundle: в src/App.tsx остался стартовый шаблон (заголовок/бейдж из template) — основной UI не заменён');
   }
   return parts.length ? `Проблемы: ${parts.join('; ')}.` : '';
 }

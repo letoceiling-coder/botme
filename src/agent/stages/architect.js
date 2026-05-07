@@ -24,7 +24,13 @@ const ARCHITECT_SYSTEM = `Ты — frontend-архитектор. Получае
 - состояние с десятками компонентов, реальная сборка через esbuild на сервере.
 - ВАЖНО: пользователь должен явно требовать «продвинутое React-приложение» или фича-объём это оправдывает.
 
-needsContext7: 1-3 имени библиотек, по которым нужно подтянуть свежие docs (только если они нестандартные или в брифе указаны конкретные API).`;
+needsContext7: 1-3 имени библиотек, по которым нужно подтянуть свежие docs (только если они нестандартные или в брифе указаны конкретные API).
+
+КРИТИЧНО — ОГРАНИЧЕНИЯ ЭТОЙ ПЛАТФОРМЫ:
+- Генератор выдаёт только набор файлов для превью: static HTML или react-bundle (esbuild), без отдельного деплоимого backend-репозитория.
+- НЕ создаются PostgreSQL/MongoDB/Redis, Prisma, persistent Fastify/Nest API, боевые WebSocket-серверы с БД и «authoritative server-side» античит-логикой в том смысле, как просят в enterprise-промптах.
+- Если в брифе/пожеланиях фигурируют БД, Prisma, Fastify/Nest, отдельный Node-сервер, multiplayer через реальный WS — в notes ОБЯЗАТЕЛЬНО укажи: реализуем один браузерный SPA/симулятор с полной игровой логикой в клиентском коде (Zustand и т.д.), без настоящего персистентного бэкенда в этой генерации.
+- Для тяжёлых игр/SPA с десятками экранов предпочитай kind="react-bundle", но не обещай инфраструктуру вне одного артефакта превью.`;
 
 const ARCHITECT_MODELS = [
   'claude:claude-haiku-4-5-20251001',
@@ -41,6 +47,22 @@ function pickArchitectModel(userModel) {
   return userModel;
 }
 
+/** В исходном промпте часто просят стек, который генератор физически не собирает — помечаем в plan.notes для Coder. */
+const BACKEND_INFRA_RE =
+  /postgres(?:ql)?|prisma|\bredis\b|mongo(?:db)?|\bfastify\b|nest(?:js)?|sequelize|typeorm|drizzle|socket\.io|\bwebsocket\b|\bweb\s*socket\b|серверн[аоы][яем].*логик|authoritative|anti-?cheat|античит|\borm\b/i;
+
+export function annotatePlanWithInfraReality(plan, rawPrompt = '') {
+  if (!plan || typeof plan !== 'object') return plan;
+  const p = String(rawPrompt || '');
+  if (!BACKEND_INFRA_RE.test(p)) return plan;
+  const tag =
+    '[Платформа] Отдельный backend/БД/authoritative WS-сервер здесь не генерируется. ' +
+    'Сделай полноценную игру/логику в одном react-bundle: Zustand, Framer Motion, локальные «боты», симуляция тиража в браузере. ' +
+    'Обязательно замени src/App.tsx — никакого текста «Шаблон react-bundle» и бейджа esbuild-шаблона.';
+  plan.notes = [plan.notes, tag].filter(Boolean).join(' ');
+  return plan;
+}
+
 function safeParseJson(text) {
   if (!text) return null;
   let s = String(text).trim();
@@ -52,7 +74,7 @@ function safeParseJson(text) {
   try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
 }
 
-export async function runArchitect({ brief, model, projectId, bus }) {
+export async function runArchitect({ brief, model, projectId, bus, rawPrompt = '' }) {
   bus.startPhase('architect', 'Архитектура');
   try {
     const archModel = pickArchitectModel(model);
@@ -89,6 +111,7 @@ export async function runArchitect({ brief, model, projectId, bus }) {
     json.routes ||= brief?.pages || ['index'];
     json.libraries ||= [];
     json.needsContext7 ||= [];
+    annotatePlanWithInfraReality(json, rawPrompt);
 
     bus.donePhase('architect', {
       kind: json.kind,
@@ -98,16 +121,18 @@ export async function runArchitect({ brief, model, projectId, bus }) {
     return { plan: json, modelUsed: result.modelUsed, usage: result.usage };
   } catch (e) {
     bus.errorPhase('architect', e?.message || String(e), e?.code);
+    const fallbackPlan = {
+      kind: 'static',
+      stack: ['html', 'tailwindcss'],
+      libraries: ['aos', 'lucide'],
+      routes: brief?.pages || ['index'],
+      notes: 'architect-стадия упала, используется дефолт',
+      needsContext7: [],
+      smokeFocus: 'index.html без ошибок',
+    };
+    annotatePlanWithInfraReality(fallbackPlan, rawPrompt);
     return {
-      plan: {
-        kind: 'static',
-        stack: ['html', 'tailwindcss'],
-        libraries: ['aos', 'lucide'],
-        routes: brief?.pages || ['index'],
-        notes: 'architect-стадия упала, используется дефолт',
-        needsContext7: [],
-        smokeFocus: 'index.html без ошибок',
-      },
+      plan: fallbackPlan,
       modelUsed: model,
       usage: { input: 0, output: 0, total: 0 },
       error: e?.message,

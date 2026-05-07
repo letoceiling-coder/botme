@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateProjectIntegrity, normalizeLocalRef } from '../src/project-validator.js';
+import { validateProjectIntegrity, normalizeLocalRef, isReactBundleAppPlaceholder } from '../src/project-validator.js';
 
 test('Vite scaffold (только index.html, ссылки на /src/main.tsx) — определяется как broken', () => {
   const files = new Map([
@@ -103,6 +103,19 @@ test('badRuntime: ESM-импорт react из npm — broken', () => {
   const r = validateProjectIntegrity(files);
   assert.equal(r.ok, false);
   assert.equal(r.badRuntime.find((b) => b.kind === 'npm-import') != null, true);
+});
+
+test('isReactBundleAppPlaceholder: только заголовок шаблона', () => {
+  assert.equal(isReactBundleAppPlaceholder('<h1 class="x">Шаблон react-bundle</h1>'), true);
+});
+
+test('isReactBundleAppPlaceholder: бейдж + «Здесь стартует» (как в template)', () => {
+  const t = 'React + Tailwind, собрано через esbuild\nЗдесь стартует ваше React-приложение.';
+  assert.equal(isReactBundleAppPlaceholder(t), true);
+});
+
+test('isReactBundleAppPlaceholder: реальная игра без маркеров', () => {
+  assert.equal(isReactBundleAppPlaceholder(`export default function RusLoto(){return <main>Билеты</main>}`), false);
 });
 
 test('react-bundle: незаменённый шаблон в src/App.tsx — broken', () => {

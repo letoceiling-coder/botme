@@ -284,9 +284,9 @@ export async function execute(name, rawArgs, ctx) {
               ok: false,
               finished: false,
               error:
-                'Отклонено: в src/App.tsx всё ещё стартовый шаблон («Шаблон react-bundle»). ' +
+                'Отклонено: в src/App.tsx всё ещё стартовый шаблон (заголовок «Шаблон react-bundle» и/или бейдж Tailwind+esbuild из template). ' +
                 'Реализуй запрос пользователя в коде (src/App.tsx и при нужде другие файлы под src/), ' +
-                'удали заглушку, затем rebuild_bundle → run_smoke → finish_generation.',
+                'удали заглушку полностью, затем rebuild_bundle → run_smoke → finish_generation.',
             };
           }
         }

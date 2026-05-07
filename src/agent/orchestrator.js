@@ -94,7 +94,7 @@ export async function runOrchestrator(params) {
     brief = briefResult.brief;
     addUsage(briefResult.usage);
 
-    const archResult = await runArchitect({ brief, model, projectId, bus });
+    const archResult = await runArchitect({ brief, model, projectId, bus, rawPrompt: prompt });
     plan = archResult.plan;
     addUsage(archResult.usage);
   } else {
