@@ -881,13 +881,11 @@ app.post('/api/generate/stream', async (req, res) => {
     project.usage.output += u.output || 0;
     project.usage.total += u.total || 0;
 
-    const integrity = orch.classicText
-      ? validateProjectIntegrity(new Map(Object.entries(project.files)))
-      : null;
+    const integrity = validateProjectIntegrity(new Map(Object.entries(project.files)));
 
-    const indexOk = !!project.files['index.html'];
+    const indexOk = !!project.files['index.html'] || !!project.files['dist/index.html'];
     const smokeOk = !!orch.smoke?.ok;
-    const isBroken = !indexOk || !smokeOk;
+    const isBroken = !indexOk || !smokeOk || !integrity.ok;
 
     const usageNote = `📊 Токенов: ${u.total.toLocaleString('ru-RU')} (in: ${u.input}, out: ${u.output})`;
     const modelLine = orch.modelUsed ? `🤖 ${orch.modelUsed}` : '';
@@ -905,11 +903,15 @@ app.post('/api/generate/stream', async (req, res) => {
       ? `\n\n📚 Context7: ${orch.context7Used.map((u) => u.name).join(', ')}`
       : '';
 
+    const integrityLine = !integrity.ok
+      ? `\n\n⚠ Целостность: ${describeIntegrity(integrity)}`
+      : '';
+
     const filesNote = finalFileList.length === 1
       ? `Готово. Один файл: index.html (${(project.files['index.html'] || '').length.toLocaleString('ru-RU')} символов).`
       : `Готово. ${finalFileList.length} файлов проекта:\n${finalFileList.map((f) => `  • ${f} (${(project.files[f] || '').length.toLocaleString('ru-RU')} симв.)`).join('\n')}`;
 
-    const assistantText = `${filesNote}\n\n${usageNote} ${modelLine} ${fbLine}${ctx7Line}\n\n${smokeLine}${finishLine}${sugLine}`.trim();
+    const assistantText = `${filesNote}\n\n${usageNote} ${modelLine} ${fbLine}${ctx7Line}\n\n${smokeLine}${integrityLine}${finishLine}${sugLine}`.trim();
 
     project.messages.push({
       role: 'assistant',
@@ -935,7 +937,7 @@ app.post('/api/generate/stream', async (req, res) => {
       brokenProject: isBroken,
       noFiles: !finalFileList.length,
       smoke: orch.smoke ? { ok: orch.smoke.ok, errors: orch.smoke.errors, warnings: orch.smoke.warnings, runner: orch.smoke.runner } : null,
-      integrity: integrity ? { ok: integrity.ok, missing: integrity.missing } : null,
+      integrity: { ok: integrity.ok, reactBundlePlaceholder: integrity.reactBundlePlaceholder, missing: integrity.missing },
       brief: orch.brief,
       plan: orch.plan,
       suggestions: orch.suggestions,

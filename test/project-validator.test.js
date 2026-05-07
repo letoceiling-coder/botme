@@ -105,6 +105,19 @@ test('badRuntime: ESM-импорт react из npm — broken', () => {
   assert.equal(r.badRuntime.find((b) => b.kind === 'npm-import') != null, true);
 });
 
+test('react-bundle: незаменённый шаблон в src/App.tsx — broken', () => {
+  const files = new Map([
+    ['src/App.tsx', `export default function App() {
+      return <>
+      <h1>Шаблон react-bundle</h1>
+      <p>Здесь стартует ваше React-приложение. Замените.</p>
+      </>`],
+  ]);
+  const r = validateProjectIntegrity(files);
+  assert.equal(r.ok, false);
+  assert.equal(r.reactBundlePlaceholder, true);
+});
+
 test('truncatedHtml: index.html без </html> — broken', () => {
   const files = new Map([
     ['index.html', `<!DOCTYPE html><html><body><h1>Hi</h1>`],

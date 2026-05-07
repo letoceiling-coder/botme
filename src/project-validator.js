@@ -120,12 +120,19 @@ export function validateProjectIntegrity(files) {
   let hasFrameworkScaffold = false;
   let scaffoldKind = null;
   const badRuntime = []; // Array<{ kind, sample }>
+  let reactBundlePlaceholder = false;
 
   const entries = files instanceof Map ? [...files.entries()] : Object.entries(files || {});
 
   for (const [name, content] of entries) {
     if (!/\.(html?|jsx?|tsx?|css|mjs|cjs)$/i.test(name)) continue;
     const text = content || '';
+    const normName = String(name).replace(/\\/g, '/');
+    if (/^src\/App\.tsx$/i.test(normName)
+      && /Шаблон react-bundle/.test(text)
+      && /Здесь стартует ваше React-приложение/.test(text)) {
+      reactBundlePlaceholder = true;
+    }
 
     // Глобальные патологические паттерны — без UMD-сборки / npm-импорты.
     for (const bp of BAD_RUNTIME_PATTERNS) {
@@ -179,13 +186,15 @@ export function validateProjectIntegrity(files) {
   }
 
   return {
-    ok: !hasFrameworkScaffold && missingUniq.length === 0 && badRuntime.length === 0 && truncatedHtml.length === 0,
+    ok: !hasFrameworkScaffold && missingUniq.length === 0 && badRuntime.length === 0 && truncatedHtml.length === 0
+      && !reactBundlePlaceholder,
     hasFrameworkScaffold,
     scaffoldKind,
     missing: missingUniq,
     referencedExternally,
     badRuntime,
     truncatedHtml,
+    reactBundlePlaceholder,
   };
 }
 
@@ -208,6 +217,9 @@ export function describeIntegrity(report) {
   }
   if (report.truncatedHtml?.length) {
     parts.push(`HTML обрезан (нет </html>) в ${report.truncatedHtml.join(', ')}`);
+  }
+  if (report.reactBundlePlaceholder) {
+    parts.push('react-bundle: в src/App.tsx остался стартовый шаблон («Шаблон react-bundle») — основной UI не заменён');
   }
   return parts.length ? `Проблемы: ${parts.join('; ')}.` : '';
 }
