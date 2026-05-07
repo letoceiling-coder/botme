@@ -118,6 +118,20 @@ test('react-bundle: незаменённый шаблон в src/App.tsx — bro
   assert.equal(r.reactBundlePlaceholder, true);
 });
 
+test('react-bundle шаблон: import в src/App.tsx + корневой index → bundle в dist/ — ок', () => {
+  const files = new Map([
+    ['src/App.tsx', `import React from 'react';\nimport { motion } from 'framer-motion';\nexport default () => <div />`],
+    ['index.html', `<!DOCTYPE html><html><link rel="stylesheet" href="bundle.css"><script type="module" src="bundle.js"></script></html>`],
+    ['dist/bundle.js', '/* x */'],
+    ['dist/bundle.css', '/* x */'],
+    ['dist/index.html', '<!DOCTYPE html><html></html>'],
+  ]);
+  const r = validateProjectIntegrity(files);
+  assert.equal(r.ok, true);
+  assert.equal(r.missing.length, 0);
+  assert.equal(r.badRuntime.length, 0);
+});
+
 test('truncatedHtml: index.html без </html> — broken', () => {
   const files = new Map([
     ['index.html', `<!DOCTYPE html><html><body><h1>Hi</h1>`],

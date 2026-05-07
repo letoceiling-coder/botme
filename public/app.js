@@ -924,10 +924,13 @@ async function sendPrompt(prefilledPrompt) {
     const filesNote = (res.files && res.files.length > 1) ? ` • ${res.files.length} файлов` : '';
     els.chatSub.textContent = `id: ${res.id.slice(0, 8)} • ${res.modelUsed || res.model} • ${pu.calls} вызовов, ${pu.total.toLocaleString('ru-RU')} токенов${filesNote}`;
 
-    if (res.hasHtml && !res.brokenProject) {
+    const smokeBad = !!(res.smoke && res.smoke.ok === false);
+    if (res.hasHtml && !smokeBad) {
       showPreview(res.id, res.files || ['index.html']);
-    } else if (res.brokenProject) {
+    } else {
       hidePreview();
+    }
+    if (res.brokenProject) {
       buildBrokenProjectBubble(res, model);
     }
     // Карточка ревьюера (только если smoke ok и suggestions есть)
@@ -940,8 +943,10 @@ async function sendPrompt(prefilledPrompt) {
     }
     await loadProjects();
     refreshProviderStatus();
-    if (res.brokenProject) {
-      els.status.innerHTML = `<span class="dot err"></span>проект битый · повторите или смените модель`;
+    if (!res.hasHtml || smokeBad) {
+      els.status.innerHTML = `<span class="dot err"></span>нет HTML или ошибка smoke`;
+    } else if (res.brokenProject) {
+      els.status.innerHTML = `<span class="dot err"></span>есть замечания / правьте промпт (${res.usage?.total || 0} токенов)`;
     } else {
       els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage?.total || 0} токенов`;
     }

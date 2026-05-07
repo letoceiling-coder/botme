@@ -108,6 +108,20 @@ function collapsePath(p) {
   return out.join('/');
 }
 
+/** Исходники, которые собирает esbuild: import from 'react' ≠ отсутствующий файл в проекте. */
+export function isBundlerManagedSource(normName) {
+  return /^src\/.+\.(tsx|ts|jsx|js|cjs|mjs)$/i.test(normName);
+}
+
+/** Корневой шаблон index.html ссылается на bundle.*; артефакты лежат в dist/. */
+function projectContainsPath(fileSet, normalized) {
+  if (fileSet.has(normalized)) return true;
+  if (normalized === 'bundle.js' || normalized === 'bundle.css') {
+    if (fileSet.has(`dist/${normalized}`)) return true;
+  }
+  return false;
+}
+
 /** Главная проверка. files: Map<string,string> или объект с тем же интерфейсом. */
 export function validateProjectIntegrity(files) {
   const fileSet = files instanceof Map
@@ -134,8 +148,10 @@ export function validateProjectIntegrity(files) {
       reactBundlePlaceholder = true;
     }
 
-    // Глобальные патологические паттерны — без UMD-сборки / npm-импорты.
+    // Глобальные патологические паттерны — без UMD-сборки / npm-импорты в HTML/CDN.
+    // В src/*.tsx импорты npm — норма для react-bundle (резолвит сборщик).
     for (const bp of BAD_RUNTIME_PATTERNS) {
+      if (bp.kind === 'npm-import' && isBundlerManagedSource(normName)) continue;
       if (bp.re.test(text) && !badRuntime.some((b) => b.kind === bp.kind)) {
         const m = text.match(bp.re);
         badRuntime.push({ kind: bp.kind, from: name, sample: (m?.[0] || '').slice(0, 80) });
@@ -147,6 +163,9 @@ export function validateProjectIntegrity(files) {
       // помечаем как «truncated» — отдельный флаг ниже
       truncatedHtml.push(name);
     }
+
+    // Импорты и href внутри собираемого TS/JS не являются путями к статике превью.
+    if (isBundlerManagedSource(normName)) continue;
 
     const refs = extractRefsFromHtml(text);
     for (const ref of refs) {
@@ -167,7 +186,7 @@ export function validateProjectIntegrity(files) {
         continue;
       }
       if (!local) continue;
-      if (!fileSet.has(local)) {
+      if (!projectContainsPath(fileSet, local)) {
         missing.push({ from: name, ref: ref.trim(), normalized: local });
       } else {
         referencedExternally.push({ from: name, ref: ref.trim() });

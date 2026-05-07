@@ -33,7 +33,11 @@ function pickCoderModel(userModel) {
 function buildCoderSystemPrompt({ siteSystemPrompt, brief, plan, mode = 'fresh', existingFiles = [] }) {
   const intro = mode === 'patch'
     ? `Ты — Coder в РЕЖИМЕ ПРАВКИ. Проект уже существует на диске, нужно ВНЕСТИ ТОЧЕЧНЫЕ ИЗМЕНЕНИЯ через apply_patch. НЕ переписывай файлы целиком write_file без необходимости. Работай минимальными апрувленными правками.`
-    : `Ты — Coder. Создай проект с нуля в виде набора файлов на диске через write_file. Главный файл — index.html в корне проекта.`;
+    : plan?.kind === 'react-bundle'
+      ? `Ты — Coder. Это уже развёрнутый **react-bundle** (esbuild + PostCSS Tailwind в template): есть src/App.tsx, main.tsx, index.html для dist.
+Твоя задача — реализовать запрос пользователя **в коде**: перепиши src/App.tsx (и при нужде добавь файлы под src/).
+**ЗАПРЕЩЕНО** оставлять текст «Шаблон react-bundle» и абзац-заглушку про «Здесь стартует ваше React-приложение». Это брак.` 
+      : `Ты — Coder. Создай проект с нуля в виде набора файлов на диске через write_file. Главный файл — index.html в корне проекта.`;
 
   const filesNote = existingFiles.length
     ? `\n\nСУЩЕСТВУЮЩИЕ ФАЙЛЫ ПРОЕКТА:\n${existingFiles.map((f) => `  • ${f}`).join('\n')}`
@@ -50,15 +54,19 @@ function buildCoderSystemPrompt({ siteSystemPrompt, brief, plan, mode = 'fresh',
       `такие абсолютные пути уходят на корень домена и дают 404 + MIME text/html.\n`
     : '';
 
-  return `${intro}
+  const protoStep1 = mode === 'patch'
+    ? 'При необходимости read_file для актуального содержимого. Используй apply_patch для изменений.'
+    : plan?.kind === 'react-bundle'
+      ? 'Главная логика — в src/App.tsx и при нужде доп. файлах под src/. После существенных правок подключён rebuild_bundle, затем run_smoke.'
+      : 'Используй write_file для каждого файла проекта. Главный — index.html в корне проекта.';
 
-ПРОТОКОЛ РАБОТЫ (СТРОГО):
-1. ${mode === 'patch' ? 'При необходимости read_file для актуального содержимого. Используй apply_patch для изменений.' : 'Используй write_file для каждого файла проекта. Главный — index.html в корне.'}
-2. По завершении работы вызови run_smoke для самопроверки.
-3. Если smoke вернул ошибки — исправь их через apply_patch и повтори run_smoke.
-4. Когда всё ок — вызови finish_generation с коротким описанием изменений.
-
-КРИТИЧНЫЕ ПРАВИЛА КАЧЕСТВА (нарушение = брак):
+  const qualityBlock = plan?.kind === 'react-bundle'
+    ? `КРИТИЧНЫЕ ПРАВИЛА react-bundle:
+- Это сборка через esbuild + Tailwind через PostCSS (src/styles/tailwind.css уже подключён) — не требуй cdn.tailwindcss.com как у static-сайтов.
+- import из npm в .tsx (.ts) разрешён: react, react-dom, framer-motion, lucide-react, zustand и т.д. Сборщик включит их в bundle.js.
+- Не добавляй <script type="text/babel"> и UMD-хаков — нужен только type="module" в итоговом index как в шаблоне.
+- Если context7_lookup помогает — вызывай.`
+    : `КРИТИЧНЫЕ ПРАВИЛА КАЧЕСТВА (нарушение = брак):
 - Tailwind ТОЛЬКО через https://cdn.tailwindcss.com (это runtime-JIT). НИКОГДА \`<link>\` на cdn.jsdelivr.net/npm/tailwindcss@*/dist/.
 - Если используешь \`<script type="text/babel">\` — обязательны 3 строки в <head>:
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -68,7 +76,17 @@ function buildCoderSystemPrompt({ siteSystemPrompt, brief, plan, mode = 'fresh',
 - НИКАКИХ \`@apply\` в обычном <style> (cdn.tailwindcss.com не процессит).
 - НИКАКИХ \`framer-motion\`, \`react-router-dom\`, \`lucide-react\` — UMD на CDN не работает.
 - Любые unpkg.com/<lib> — ОБЯЗАТЕЛЬНО pinned (с @версией).
-- Если context7_lookup мог бы помочь по библиотеке — вызывай его перед use.
+- Если context7_lookup мог бы помочь по библиотеке — вызывай его перед use.`;
+
+  return `${intro}
+
+ПРОТОКОЛ РАБОТЫ (СТРОГО):
+1. ${protoStep1}
+2. По завершении работы вызови run_smoke для самопроверки.
+3. Если smoke вернул ошибки — исправь их через apply_patch и повтори run_smoke.
+4. Когда всё ok — вызови finish_generation с коротким описанием изменений.
+
+${qualityBlock}
 ${bundleAssetRule}${briefBlock}${planBlock}${filesNote}
 
 НИЖЕ — общий design-промпт нашего сервиса (премиум-уровень). Соблюдай:

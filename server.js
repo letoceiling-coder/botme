@@ -936,6 +936,8 @@ app.post('/api/generate/stream', async (req, res) => {
       projectUsage: project.usage,
       brokenProject: isBroken,
       noFiles: !finalFileList.length,
+      missingFiles: integrity.missing?.map((m) => m.normalized || m.ref) || [],
+      scaffoldKind: integrity.hasFrameworkScaffold ? integrity.scaffoldKind : null,
       smoke: orch.smoke ? { ok: orch.smoke.ok, errors: orch.smoke.errors, warnings: orch.smoke.warnings, runner: orch.smoke.runner } : null,
       integrity: { ok: integrity.ok, reactBundlePlaceholder: integrity.reactBundlePlaceholder, missing: integrity.missing },
       brief: orch.brief,
