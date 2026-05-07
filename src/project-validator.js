@@ -24,6 +24,24 @@ const FRAMEWORK_PATTERNS = [
   { kind: 'cra',  re: /(?:^|[\s"'(=])\/?(?:static\/js\/main|static\/css\/main)\.[\w]+\.(?:js|css)/i },
 ];
 
+/**
+ * Глобальные имена/пакеты, которые модели любят подключить «через CDN», но у которых
+ * НЕТ рабочей UMD-сборки на популярных CDN — в результате `window.X` остаётся undefined
+ * и Babel падает на `Cannot destructure property 'motion' of 'window.FramerMotion'`.
+ * Ловим как глобальный паттерн в любом файле проекта.
+ */
+const BAD_RUNTIME_PATTERNS = [
+  { kind: 'framer-motion', re: /\bwindow\.FramerMotion\b/ },
+  { kind: 'framer-motion', re: /\bunpkg\.com\/framer-motion\b/i },
+  { kind: 'framer-motion', re: /\bcdn\.jsdelivr\.net\/npm\/framer-motion\b/i },
+  { kind: 'react-router-dom', re: /\bwindow\.ReactRouterDOM\b/ },
+  { kind: 'react-router-dom', re: /\bunpkg\.com\/react-router-dom\b/i },
+  { kind: 'lucide-react', re: /\bwindow\.LucideReact\b/ },
+  { kind: 'lucide-react', re: /\bunpkg\.com\/lucide-react\b/i },
+  // ESM-импорты пакетов из npm в JSX/JS — без сборщика не работают.
+  { kind: 'npm-import', re: /\bimport\s+[\w*{},\s]+\s+from\s+["'](?:react|react-dom|react-router(?:-dom)?|framer-motion|lucide-react|next\/[\w-]+|@?[\w@-]+\/[\w-]+)["']/ },
+];
+
 /** Внешние схемы — пропускаем. */
 const EXTERNAL_SCHEME_RE = /^(?:https?:|data:|blob:|mailto:|tel:|sms:|javascript:|about:|#)/i;
 
@@ -95,17 +113,35 @@ export function validateProjectIntegrity(files) {
   const fileSet = files instanceof Map
     ? new Set([...files.keys()])
     : new Set(Object.keys(files || {}));
+  const truncatedHtml = [];
 
   const missing = [];
   const referencedExternally = [];
   let hasFrameworkScaffold = false;
   let scaffoldKind = null;
+  const badRuntime = []; // Array<{ kind, sample }>
 
   const entries = files instanceof Map ? [...files.entries()] : Object.entries(files || {});
 
   for (const [name, content] of entries) {
     if (!/\.(html?|jsx?|tsx?|css|mjs|cjs)$/i.test(name)) continue;
-    const refs = extractRefsFromHtml(content || '');
+    const text = content || '';
+
+    // Глобальные патологические паттерны — без UMD-сборки / npm-импорты.
+    for (const bp of BAD_RUNTIME_PATTERNS) {
+      if (bp.re.test(text) && !badRuntime.some((b) => b.kind === bp.kind)) {
+        const m = text.match(bp.re);
+        badRuntime.push({ kind: bp.kind, from: name, sample: (m?.[0] || '').slice(0, 80) });
+      }
+    }
+
+    // Файл оборвался по лимиту токенов?
+    if (/\.html?$/i.test(name) && /^\s*<!doctype/i.test(text) && !/<\/html\s*>/i.test(text)) {
+      // помечаем как «truncated» — отдельный флаг ниже
+      truncatedHtml.push(name);
+    }
+
+    const refs = extractRefsFromHtml(text);
     for (const ref of refs) {
       // Скан scaffold-маркеров делаем по сырому ref, до нормализации.
       for (const fp of FRAMEWORK_PATTERNS) {
@@ -143,25 +179,35 @@ export function validateProjectIntegrity(files) {
   }
 
   return {
-    ok: !hasFrameworkScaffold && missingUniq.length === 0,
+    ok: !hasFrameworkScaffold && missingUniq.length === 0 && badRuntime.length === 0 && truncatedHtml.length === 0,
     hasFrameworkScaffold,
     scaffoldKind,
     missing: missingUniq,
     referencedExternally,
+    badRuntime,
+    truncatedHtml,
   };
 }
 
 /** Короткое описание проблемы для текстового сообщения и для retry-промпта. */
 export function describeIntegrity(report) {
   if (!report) return '';
+  const parts = [];
   if (report.hasFrameworkScaffold) {
     const kind = report.scaffoldKind || 'framework';
     const missingSamples = report.missing.slice(0, 3).map((m) => m.normalized || m.ref).join(', ');
-    return `Ответ модели — пустой ${kind}-скелет (ссылается на отсутствующие файлы${missingSamples ? `: ${missingSamples}` : ''}). Превью будет пустым.`;
+    parts.push(`пустой ${kind}-скелет (ссылается на отсутствующие файлы${missingSamples ? `: ${missingSamples}` : ''})`);
   }
-  if (report.missing.length) {
+  if (report.badRuntime?.length) {
+    const list = report.badRuntime.map((b) => b.kind).join(', ');
+    parts.push(`использование пакетов без рабочей UMD-сборки на CDN: ${list} — превью падает с TypeError`);
+  }
+  if (report.missing?.length && !report.hasFrameworkScaffold) {
     const list = report.missing.slice(0, 5).map((m) => m.normalized || m.ref).join(', ');
-    return `В проекте есть ссылки на файлы, которых модель не приложила: ${list}.`;
+    parts.push(`ссылки на отсутствующие файлы: ${list}`);
   }
-  return '';
+  if (report.truncatedHtml?.length) {
+    parts.push(`HTML обрезан (нет </html>) в ${report.truncatedHtml.join(', ')}`);
+  }
+  return parts.length ? `Проблемы: ${parts.join('; ')}.` : '';
 }

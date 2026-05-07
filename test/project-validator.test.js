@@ -75,3 +75,41 @@ test('normalizeLocalRef: относительный путь от вложенн
   assert.equal(normalizeLocalRef('app.js', 'pages/sub.html'), 'pages/app.js');
   assert.equal(normalizeLocalRef('../assets/x.css', 'pages/sub.html'), 'assets/x.css');
 });
+
+test('badRuntime: window.FramerMotion без CDN — broken', () => {
+  const files = new Map([
+    ['index.html', `<!DOCTYPE html><html><head>
+      <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+      </head><body><div id="root"></div>
+      <script type="text/babel">
+        const { motion } = window.FramerMotion;
+        const App = () => <motion.div>x</motion.div>;
+      </script></body></html>`],
+  ]);
+  const r = validateProjectIntegrity(files);
+  assert.equal(r.ok, false);
+  assert.equal(r.badRuntime[0].kind, 'framer-motion');
+});
+
+test('badRuntime: ESM-импорт react из npm — broken', () => {
+  const files = new Map([
+    ['index.html', `<!DOCTYPE html><html><body>
+      <script type="module">
+        import React from 'react';
+        import { motion } from 'framer-motion';
+        console.log(React, motion);
+      </script></body></html>`],
+  ]);
+  const r = validateProjectIntegrity(files);
+  assert.equal(r.ok, false);
+  assert.equal(r.badRuntime.find((b) => b.kind === 'npm-import') != null, true);
+});
+
+test('truncatedHtml: index.html без </html> — broken', () => {
+  const files = new Map([
+    ['index.html', `<!DOCTYPE html><html><body><h1>Hi</h1>`],
+  ]);
+  const r = validateProjectIntegrity(files);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.truncatedHtml, ['index.html']);
+});

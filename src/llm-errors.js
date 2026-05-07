@@ -89,11 +89,19 @@ export function classifyLlmError(e) {
     return mk('aborted', status, raw, { retryable: false, skipProvider: false });
   }
 
-  // Сетевые ошибки уровня node
+  // Сетевые ошибки уровня node + transport-level от undici/fetch
+  // (особенно «Premature close» — стрим оборван посередине ответа провайдера).
   if (
     ['enotfound', 'eai_again', 'econnreset', 'econnrefused', 'etimedout', 'eai_fail', 'epipe', 'esockettimedout'].includes(errCode)
+    || errCode === 'und_err_socket'
+    || errCode === 'und_err_req_content_length_mismatch'
     || lc.includes('fetch failed')
     || lc.includes('socket hang up')
+    || lc.includes('premature close')
+    || lc.includes('invalid response body')
+    || lc.includes('terminated')
+    || lc.includes('client network socket disconnected')
+    || lc.includes('other side closed')
   ) {
     return mk('network', status, raw, { retryable: true, skipProvider: false });
   }

@@ -2,6 +2,8 @@
 // AI Site Builder — frontend
 // =============================================================
 
+import { createPhaseTimeline } from '/components/phase-timeline.js?v=1';
+
 const $ = (sel) => document.querySelector(sel);
 
 const els = {
@@ -31,7 +33,78 @@ const els = {
   statsBody: $('#statsBody'),
   closeStatsBtn: $('#closeStatsBtn'),
   resetStatsBtn: $('#resetStatsBtn'),
+  providerBanner: $('#providerBanner'),
+  providerBannerText: $('#providerBannerText'),
 };
+
+// Объединённое состояние health-чека провайдеров: probe (активная диагностика
+// через /key + ping) и passive (накопленные ошибки из реальных вызовов).
+let lastProviderProbe = null;
+
+/** Опрос /api/provider-status и обновление баннера. Запускается при init и после ошибок. */
+async function refreshProviderStatus({ probe = false } = {}) {
+  if (!els.providerBanner) return;
+  try {
+    const url = probe ? '/api/provider-status?probe=1' : '/api/provider-status';
+    const data = await api(url, { method: 'GET' });
+    lastProviderProbe = data?.probe || lastProviderProbe;
+    renderProviderBanner(data?.providers || {}, lastProviderProbe);
+  } catch {
+    /* молча — баннер не критичен */
+  }
+}
+
+function renderProviderBanner(passive, probe) {
+  const probeResults = probe?.results || {};
+  const failingFromProbe = Object.entries(probeResults)
+    .filter(([, r]) => r && r.ok === false)
+    .map(([prov, r]) => ({ prov, kind: r.kind, message: r.message, raw: r.raw, model: r.model }));
+  const passiveEntries = Object.entries(passive || {}).filter(([prov]) => !failingFromProbe.find((p) => p.prov === prov));
+  const passiveItems = passiveEntries.map(([prov, info]) => ({ prov, kind: info.kind, message: info.message }));
+  const all = [...failingFromProbe, ...passiveItems];
+
+  if (!all.length && !probe) {
+    els.providerBanner.classList.add('hidden');
+    return;
+  }
+
+  // Зелёные провайдеры из probe — используем для рекомендации
+  const okProvs = Object.entries(probeResults).filter(([, r]) => r && r.ok).map(([prov, r]) => ({ prov, message: r.message }));
+  const recommend = okProvs.length
+    ? `<div class="text-emerald-300 text-[11px] mt-1.5">✓ Сейчас работают: ${okProvs.map((p) => `<b>${PROVIDER_LABELS[p.prov] || p.prov}</b>${p.message ? ` (${escapeHtml(p.message)})` : ''}`).join(' · ')}</div>`
+    : '';
+
+  if (!all.length) {
+    // probe прошёл, всё ок — короткая инфа
+    els.providerBannerText.innerHTML = `✓ Все провайдеры в порядке.${recommend}`;
+    els.providerBanner.classList.remove('hidden');
+    els.providerBanner.classList.remove('bg-yellow-400/10', 'border-yellow-400/25', 'text-yellow-200');
+    els.providerBanner.classList.add('bg-emerald-500/10', 'border-emerald-500/25', 'text-emerald-100');
+    return;
+  }
+
+  const summary = all.map((it) => {
+    const label = PROVIDER_LABELS[it.prov] || it.prov;
+    const kind = PROVIDER_KIND_LABELS[it.kind] || it.kind || 'недоступен';
+    return `<b>${label}</b>: ${kind}`;
+  }).join(' · ');
+  els.providerBannerText.innerHTML =
+    `⚠ Сбойные провайдеры: ${summary}.` +
+    `${recommend}` +
+    ` <button type="button" id="probeBtn" class="ml-2 underline hover:text-white">Перепроверить ключи</button>`;
+  els.providerBanner.classList.remove('hidden');
+  els.providerBanner.classList.remove('bg-emerald-500/10', 'border-emerald-500/25', 'text-emerald-100');
+  els.providerBanner.classList.add('bg-yellow-400/10', 'border-yellow-400/25', 'text-yellow-200');
+
+  const btn = document.getElementById('probeBtn');
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = '⏳ проверяю…';
+      await refreshProviderStatus({ probe: true });
+    });
+  }
+}
 
 const QUICK_PROMPTS = [
   { label: '🏠 Лендинг', text: 'Премиум лендинг для натяжных потолков в Воронеже. Цвета: чёрный + золотой. Блоки: hero с фоновым фото интерьера и заголовком «Натяжные потолки под ключ за 1 день», 4 быстрых преимущества, интерактивный калькулятор (площадь × тип), галерея работ (минимум 6 фото), 4 преимущества, услуги (5 карточек), как мы работаем (4 шага), отзывы с фото клиентов и звёздами, акция со срочностью, форма заявки, контакты с телефоном и WhatsApp. Sticky-меню, плавные AOS-анимации, hover-эффекты на всех карточках, адаптив.' },
@@ -50,6 +123,26 @@ const state = {
   busy: false,
   files: [],              // список файлов текущего проекта
   currentPage: 'index.html', // активная страница в превью
+};
+
+// Описания провайдеров для status-баннера
+const PROVIDER_LABELS = {
+  openai:     'OpenAI',
+  claude:     'Claude (Anthropic)',
+  gemini:     'Gemini',
+  xai:        'Grok (xAI)',
+  openrouter: 'OpenRouter',
+  ollama:     'Ollama',
+};
+
+const PROVIDER_KIND_LABELS = {
+  quota:           'кончился баланс / квота',
+  auth:            'проблема с ключом',
+  rate_limit:      'rate-limit (429)',
+  context_overflow:'превышен лимит контекста',
+  network:         'сетевая ошибка',
+  timeout:         'таймаут',
+  overloaded:      'перегружен',
 };
 
 /** Подсказки в пузырьке ожидания — меняются со временем (генерация может идти долго). */
@@ -86,7 +179,100 @@ function removeAssistantLoadingBubble(el) {
     clearInterval(el._waitTicker);
     el._waitTicker = null;
   }
+  if (el._timeline) {
+    try { el._timeline.destroy(); } catch {}
+    el._timeline = null;
+  }
   el.remove();
+}
+
+/**
+ * Парсер SSE-потока. На вход — Response от fetch(); на выход — async generator
+ * объектов вида { event, data }. Совместим с нашим форматом сервера:
+ *   event: <type>\n
+ *   data: <json>\n\n
+ */
+async function* parseSSEStream(response) {
+  if (!response.ok) {
+    // На сервере ошибка отдана JSON-ом, не SSE — пробрасываем как throw
+    let body = '';
+    try { body = await response.text(); } catch {}
+    throw Object.assign(new Error('SSE init failed: ' + response.status + ' ' + body.slice(0, 200)), {
+      code: 'sse_http_' + response.status,
+    });
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    // SSE-сообщения разделены пустой строкой (CRLF/LF толерантно)
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const block = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const lines = block.split('\n');
+      let event = 'message';
+      const dataLines = [];
+      for (const ln of lines) {
+        if (ln.startsWith(':')) continue;       // комментарий/heartbeat
+        if (ln.startsWith('event: ')) event = ln.slice(7).trim();
+        else if (ln.startsWith('data: ')) dataLines.push(ln.slice(6));
+      }
+      if (!dataLines.length) continue;
+      let data;
+      try { data = JSON.parse(dataLines.join('\n')); }
+      catch { data = { raw: dataLines.join('\n') }; }
+      yield { event, data };
+    }
+  }
+}
+
+// Карта event-type → метод PhaseTimeline-а. Используется в sendPrompt при чтении SSE.
+function applyTimelineEvent(timeline, ev) {
+  if (!timeline || !ev) return;
+  switch (ev.event) {
+    case 'phase.start':    timeline.startPhase(ev.data.phase); break;
+    case 'phase.done':     timeline.donePhase(ev.data.phase, ev.data.summary); break;
+    case 'phase.skip':     timeline.skipPhase(ev.data.phase, ev.data.reason); break;
+    case 'phase.error':    timeline.errorPhase(ev.data.phase, ev.data.message); break;
+    case 'tool.call':      timeline.toolCall(ev.data.name, ev.data.args); break;
+    case 'tool.result':    timeline.toolResult(ev.data.name, ev.data.ok, ev.data.summary || ev.data.error); break;
+    case 'warn':           timeline.warn(ev.data.message); break;
+    case 'coder.token':    timeline.coderToken(ev.data.delta); break;
+    case 'coder.fallback': {
+      // Сервер автоматически переключился на следующую модель — покажем как warn
+      const reason = ev.data?.reason ? ` (${ev.data.reason})` : '';
+      timeline.warn(`Авто-фоллбек: ${ev.data.from} → ${ev.data.to}${reason}`);
+      break;
+    }
+    default: /* остальное игнорим */
+  }
+}
+
+/** Карточка ревьюера: 3 предложения с «почему/как». */
+function buildReviewerCard(suggestions, rating) {
+  if (!Array.isArray(suggestions) || !suggestions.length) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-assistant';
+  const ratingBadge = rating ? ` · <span class="text-purple-300">${escapeHtml(rating)}</span>` : '';
+  wrap.innerHTML = `
+    <div class="avatar avatar-ai">✨</div>
+    <div class="bubble">
+      <div class="reviewer-card">
+        <div class="reviewer-card-title">✨ Дизайн-ревью${ratingBadge}</div>
+        ${suggestions.map((s) => `
+          <div class="reviewer-suggestion">
+            <div class="rs-title">${escapeHtml(s.index)}. ${escapeHtml(s.title)}</div>
+            <div class="rs-why">— ${escapeHtml(s.why)}</div>
+            <div class="rs-how">→ ${escapeHtml(s.how)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+  return wrap;
 }
 
 // =============================================================
@@ -128,17 +314,46 @@ const ERROR_KIND_RU = {
 };
 
 function buildErrorBubble(err, primaryModel) {
-  const code = err?.code || 'unknown';
+  const errorsList = Array.isArray(err?.errors) ? err.errors : [];
+  // Главная причина = последняя нерассказанная "skipped_provider"
+  const lastReal = [...errorsList].reverse().find((e) => e?.kind && e.kind !== 'skipped_provider');
+  const code = lastReal?.kind || err?.code || 'unknown';
   const explain = ERROR_KIND_RU[code] || ERROR_KIND_RU.unknown;
-  const trail = Array.isArray(err?.errors) && err.errors.length
-    ? err.errors.slice(-3).map((it) =>
-        `• ${escapeHtml(it.model || '?')}${it.status ? ` [${it.status}]` : ''}: ${escapeHtml((it.message || it.raw || it.kind || '').toString().slice(0, 220))}`,
-      ).join('<br>')
+  const headline = (() => {
+    if (code === 'rate_limit') return 'Модель сейчас перегружена (rate-limit 429)';
+    if (code === 'quota')      return 'У провайдера закончился баланс/квота';
+    if (code === 'auth')       return 'Ключ API провайдера не работает';
+    if (code === 'overloaded') return 'Провайдер временно перегружен';
+    if (code === 'timeout')    return 'Модель не успела ответить вовремя';
+    if (code === 'no_models')  return 'Нет доступных моделей с ключами';
+    if (code === 'network')    return 'Сетевая ошибка до провайдера';
+    return 'Не удалось получить ответ от модели';
+  })();
+
+  // Сводный список попыток (только реальные, без skipped_provider)
+  const realErrors = errorsList.filter((it) => it.kind && it.kind !== 'skipped_provider');
+  const trail = realErrors.length
+    ? realErrors.slice(-5).map((it) => {
+        const kindRu = ({
+          rate_limit: 'rate-limit 429',
+          quota: 'нет баланса',
+          auth: 'ключ не работает',
+          overloaded: 'перегружен',
+          timeout: 'таймаут',
+          network: 'сеть',
+          not_found: 'нет такой модели',
+          context_overflow: 'превышен контекст',
+          bad_request: 'отклонён запрос',
+          unknown: 'неизвестно',
+        }[it.kind] || it.kind);
+        return `<div class="text-[11px] text-muted leading-relaxed"><span class="text-text/80">${escapeHtml(it.model || '?')}</span>${it.status ? ` <span class="text-muted">[${it.status}]</span>` : ''} → <span class="text-err/90">${escapeHtml(kindRu)}</span></div>`;
+      }).join('')
     : '';
+
   const alts = Array.isArray(err?.suggestedAlternatives) ? err.suggestedAlternatives : [];
   const altButtons = alts.length
     ? alts.slice(0, 3).map((a) =>
-        `<button type="button" class="alt-model-btn px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 text-xs" data-model="${escapeHtml(a.id)}">${escapeHtml(a.label || a.id)}</button>`
+        `<button type="button" class="alt-model-btn px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 text-xs" data-model="${escapeHtml(a.id)}" title="Переключиться и повторить">⟳ ${escapeHtml(a.label || a.id)}</button>`
       ).join('')
     : '';
 
@@ -147,16 +362,17 @@ function buildErrorBubble(err, primaryModel) {
   wrap.innerHTML = `
     <div class="avatar avatar-ai">!</div>
     <div class="bubble" style="border-color: rgba(239,68,68,0.45);">
-      <div class="text-sm font-semibold text-err">Не удалось получить ответ от модели</div>
+      <div class="text-sm font-semibold text-err">${escapeHtml(headline)}</div>
       <div class="text-xs text-text/90 mt-1.5">${escapeHtml(explain)}</div>
-      ${trail ? `<div class="text-[11px] text-muted mt-2 leading-relaxed">${trail}</div>` : ''}
+      ${trail ? `<div class="mt-2 pt-2 border-t border-border/40 space-y-0.5">
+        <div class="text-[11px] text-muted/90 mb-1">Попытки fallback-цепочки:</div>
+        ${trail}
+      </div>` : ''}
       <div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" class="retry-prompt-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">
-          ↻ Повторить
-        </button>
+        <button type="button" class="retry-prompt-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">↻ Повторить тот же запрос</button>
         ${altButtons}
       </div>
-      ${primaryModel ? `<div class="text-[11px] text-muted mt-2">Запрос был к: <span class="text-text/90">${escapeHtml(primaryModel)}</span></div>` : ''}
+      ${primaryModel ? `<div class="text-[11px] text-muted mt-2">Изначально вы выбрали: <span class="text-text/90">${escapeHtml(primaryModel)}</span></div>` : ''}
     </div>`;
   els.messages.appendChild(wrap);
   els.messages.scrollTop = els.messages.scrollHeight;
@@ -181,37 +397,54 @@ function buildErrorBubble(err, primaryModel) {
 /** Пузырь «модель вернула битый проект (Vite-скелет / нет файлов)» с кнопками. */
 function buildBrokenProjectBubble(res, primaryModel) {
   const missing = Array.isArray(res?.missingFiles) ? res.missingFiles.slice(0, 6) : [];
+  const smokeErrors = Array.isArray(res?.smoke?.errors) ? res.smoke.errors.slice(0, 6) : [];
+  const smokeWarns = Array.isArray(res?.smoke?.warnings) ? res.smoke.warnings.slice(0, 4) : [];
   const scaffold = res?.scaffoldKind ? `${res.scaffoldKind}-скелет` : 'битый проект';
-  const explainTop = res?.scaffoldKind
-    ? `Модель вернула ${scaffold}: index.html ссылается на локальные файлы, которых нет в ответе. Превью таких сайтов всегда пустое.`
-    : 'В проекте есть ссылки на локальные файлы, которых модель не приложила. Превью может работать частично.';
+  let explainTop;
+  if (res?.noFiles) {
+    explainTop = 'Модель не вернула ни одного валидного файла. Возможно, она ответила markdown-описанием архитектуры вместо кода в нужном формате.';
+  } else if (smokeErrors.length) {
+    explainTop = `Smoke-тест нашёл ошибки на странице. Превью открывается, но JS-код падает или ресурсы не загружаются (см. список ниже).`;
+  } else if (res?.scaffoldKind) {
+    explainTop = `Модель вернула ${scaffold}: index.html ссылается на локальные файлы, которых нет в ответе. Превью таких сайтов всегда пустое.`;
+  } else {
+    explainTop = 'В проекте есть проблемы, мешающие нормальной работе. Подробности — ниже.';
+  }
   const missingBlock = missing.length
-    ? `<div class="text-[11px] text-muted mt-2">Не хватает: ${missing.map((m) => `<code>${escapeHtml(m)}</code>`).join(', ')}</div>`
+    ? `<div class="text-[11px] text-muted mt-2">Не хватает файлов: ${missing.map((m) => `<code>${escapeHtml(m)}</code>`).join(', ')}</div>`
+    : '';
+  const smokeBlock = (smokeErrors.length || smokeWarns.length)
+    ? `<div class="broken-issues mt-2">
+        ${smokeErrors.length ? `<b>Ошибки smoke-теста:</b><ul>${smokeErrors.map((e) => `<li>${escapeHtml(typeof e === 'string' ? e : (e.message || JSON.stringify(e)))}</li>`).join('')}</ul>` : ''}
+        ${smokeWarns.length ? `<b class="text-yellow-300">Предупреждения:</b><ul>${smokeWarns.map((w) => `<li>${escapeHtml(typeof w === 'string' ? w : (w.message || JSON.stringify(w)))}</li>`).join('')}</ul>` : ''}
+      </div>`
     : '';
   // Альтернативные модели — берём топ из выбранного списка, кроме текущего primary.
   const alternativeIds = (state.models || [])
     .map((m) => m.id)
     .filter((id) => id !== primaryModel)
     .slice(0, 3);
-  const altButtons = alternativeIds.length
-    ? `<div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" class="retry-broken-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">↻ Сгенерировать заново</button>
-        ${alternativeIds.map((id) => `<button type="button" class="alt-model-btn px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 text-xs" data-model="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join('')}
-      </div>`
-    : `<div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" class="retry-broken-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">↻ Сгенерировать заново</button>
-      </div>`;
+  const autofixBtn = smokeErrors.length
+    ? `<button type="button" class="autofix-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-medium">🔧 Auto-fix</button>`
+    : '';
+  const altButtons = `
+    <div class="flex flex-wrap gap-2 mt-3">
+      ${autofixBtn}
+      <button type="button" class="retry-broken-btn px-2.5 py-1.5 rounded-md bg-gradient-to-r from-brand to-brand2 text-white text-xs">↻ Сгенерировать заново</button>
+      ${alternativeIds.map((id) => `<button type="button" class="alt-model-btn px-2.5 py-1.5 rounded-md bg-panel border border-border hover:border-brand/50 text-xs" data-model="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join('')}
+    </div>`;
 
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-assistant';
   wrap.innerHTML = `
     <div class="avatar avatar-ai">!</div>
     <div class="bubble" style="border-color: rgba(251,191,36,0.55);">
-      <div class="text-sm font-semibold text-yellow-300">Превью пустое — модель вернула неработающий шаблон</div>
+      <div class="text-sm font-semibold text-yellow-300">${res?.noFiles ? 'Модель не выдала рабочий код' : 'Превью с проблемами — нужны правки'}</div>
       <div class="text-xs text-text/90 mt-1.5">${escapeHtml(explainTop)}</div>
       ${missingBlock}
+      ${smokeBlock}
       ${altButtons}
-      ${primaryModel ? `<div class="text-[11px] text-muted mt-2">Запрос был к: <span class="text-text/90">${escapeHtml(primaryModel)}</span>${res?.retried ? ' · авто-ретрай уже выполнен' : ''}</div>` : ''}
+      ${primaryModel ? `<div class="text-[11px] text-muted mt-2">Запрос был к: <span class="text-text/90">${escapeHtml(primaryModel)}</span></div>` : ''}
     </div>`;
   els.messages.appendChild(wrap);
   els.messages.scrollTop = els.messages.scrollHeight;
@@ -219,6 +452,13 @@ function buildBrokenProjectBubble(res, primaryModel) {
   wrap.querySelector('.retry-broken-btn')?.addEventListener('click', () => {
     if (state.busy) return;
     sendPrompt();
+  });
+  wrap.querySelector('.autofix-btn')?.addEventListener('click', () => {
+    if (state.busy) return;
+    // Запускаем правку: prompt описывает ошибки smoke
+    const errLines = smokeErrors.map((e) => '  • ' + (typeof e === 'string' ? e : (e.message || JSON.stringify(e))));
+    const fixPrompt = `Поправь ошибки smoke-теста на странице:\n${errLines.join('\n')}\n\nИсправь только их, не трогай работающие части.`;
+    sendPrompt(fixPrompt);
   });
   wrap.querySelectorAll('.alt-model-btn').forEach((b) => {
     b.addEventListener('click', () => {
@@ -242,6 +482,10 @@ async function init() {
   renderQuickPrompts();
   newChat();
   bindEvents();
+  // Status-banner: при старте делаем АКТИВНЫЙ probe, чтобы юзер сразу видел,
+  // какие ключи валидны/мёртвые. Потом раз в 60 сек — лёгкий опрос (без probe).
+  refreshProviderStatus({ probe: true });
+  setInterval(() => refreshProviderStatus({ probe: false }), 60_000);
 }
 
 function renderQuickPrompts() {
@@ -466,29 +710,44 @@ function addMessageToDOM(role, content) {
   return wrap;
 }
 
-function addLoadingMessage(hints = GENERATION_WAIT_HINTS) {
+function addLoadingMessage(hints = GENERATION_WAIT_HINTS, opts = {}) {
+  const { useTimeline = false, mode = 'fresh' } = opts;
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-assistant';
-  wrap.innerHTML = `
-    <div class="avatar avatar-ai">AI</div>
-    <div class="bubble loading-bubble">
-      <div class="typing"><span></span><span></span><span></span></div>
-      <div class="text-sm text-text/95 mt-2 font-medium">Генерация ответа модели…</div>
-      <div class="loading-hint text-xs text-muted mt-2 leading-relaxed"></div>
-      <div class="loading-elapsed text-[11px] text-muted/85 mt-1.5 tabular-nums"></div>
-    </div>`;
-  const hintEl = wrap.querySelector('.loading-hint');
-  const elapsedEl = wrap.querySelector('.loading-elapsed');
-  const t0 = Date.now();
-  const stepMs = 26000;
-  const tick = () => {
-    const sec = Math.floor((Date.now() - t0) / 1000);
-    const idx = Math.min(Math.floor(sec / (stepMs / 1000)), hints.length - 1);
-    hintEl.textContent = hints[idx];
-    elapsedEl.textContent = `Прошло ${formatMmSs(sec)} · запрос обрабатывается, страница не зависла`;
-  };
-  tick();
-  wrap._waitTicker = setInterval(tick, 1000);
+  if (useTimeline) {
+    wrap.innerHTML = `
+      <div class="avatar avatar-ai">AI</div>
+      <div class="bubble loading-bubble">
+        <div class="text-sm text-text/95 font-medium mb-2 flex items-center gap-2">
+          Генерация
+          <span class="mode-badge mode-${escapeHtml(mode)}">${mode === 'patch' ? 'правка' : 'новая сборка'}</span>
+        </div>
+        <div class="phase-timeline-mount"></div>
+      </div>`;
+    const mount = wrap.querySelector('.phase-timeline-mount');
+    wrap._timeline = createPhaseTimeline(mount, { mode });
+  } else {
+    wrap.innerHTML = `
+      <div class="avatar avatar-ai">AI</div>
+      <div class="bubble loading-bubble">
+        <div class="typing"><span></span><span></span><span></span></div>
+        <div class="text-sm text-text/95 mt-2 font-medium">Генерация ответа модели…</div>
+        <div class="loading-hint text-xs text-muted mt-2 leading-relaxed"></div>
+        <div class="loading-elapsed text-[11px] text-muted/85 mt-1.5 tabular-nums"></div>
+      </div>`;
+    const hintEl = wrap.querySelector('.loading-hint');
+    const elapsedEl = wrap.querySelector('.loading-elapsed');
+    const t0 = Date.now();
+    const stepMs = 26000;
+    const tick = () => {
+      const sec = Math.floor((Date.now() - t0) / 1000);
+      const idx = Math.min(Math.floor(sec / (stepMs / 1000)), hints.length - 1);
+      hintEl.textContent = hints[idx];
+      elapsedEl.textContent = `Прошло ${formatMmSs(sec)} · запрос обрабатывается, страница не зависла`;
+    };
+    tick();
+    wrap._waitTicker = setInterval(tick, 1000);
+  }
   els.messages.appendChild(wrap);
   els.messages.scrollTop = els.messages.scrollHeight;
   return wrap;
@@ -604,37 +863,87 @@ async function sendPrompt(prefilledPrompt) {
     addMessageToDOM('user', prompt);
   }
   els.prompt.value = '';
-  const loadingEl = addLoadingMessage(GENERATION_WAIT_HINTS);
+  // У существующего проекта с файлами + короткий промпт — это «правка» (patch-mode);
+  // показываем соответствующий бейдж в таймлайне ещё до запроса.
+  const isPatchMode = !!(state.currentId && state.files && state.files.length > 0
+    && (prompt.trim().length < 200 || /(измени|поправ|исправ|заме|удали|добав|сдела|перекрас|подправ|fix|update|change|tweak)/i.test(prompt)));
+  const loadingEl = addLoadingMessage(GENERATION_WAIT_HINTS, { useTimeline: true, mode: isPatchMode ? 'patch' : 'fresh' });
 
+  let res = null;
   try {
-    const res = await api('/api/generate', {
+    // SSE-стрим с прогрессом фаз. Финальный payload приходит в event 'done'.
+    const sseResp = await fetch('/api/generate/stream', {
       method: 'POST',
-      body: JSON.stringify({
-        projectId: state.currentId,
-        prompt,
-        model,
-      }),
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ projectId: state.currentId, prompt, model }),
+      credentials: 'include',
     });
-    removeAssistantLoadingBubble(loadingEl);
+    let fatalError = null;
+    let initialMode = isPatchMode ? 'patch' : 'fresh';
+    for await (const ev of parseSSEStream(sseResp)) {
+      if (ev.event === 'start') {
+        initialMode = ev.data?.mode || initialMode;
+        // На сервере уточнили mode — пересоздадим таймлайн, если он отличается.
+        if (loadingEl._timeline && initialMode !== (isPatchMode ? 'patch' : 'fresh')) {
+          try { loadingEl._timeline.destroy(); } catch {}
+          const mount = loadingEl.querySelector('.phase-timeline-mount');
+          if (mount) {
+            mount.innerHTML = '';
+            loadingEl._timeline = createPhaseTimeline(mount, { mode: initialMode });
+          }
+        }
+        continue;
+      }
+      if (ev.event === 'done') { res = ev.data; break; }
+      if (ev.event === 'error') {
+        fatalError = ev.data;
+        break;
+      }
+      applyTimelineEvent(loadingEl._timeline, ev);
+    }
+    if (fatalError) {
+      loadingEl._timeline?.complete('error', fatalError.message);
+      throw Object.assign(new Error(fatalError.message || 'unknown'), {
+        code: fatalError.code,
+        errors: fatalError.errors || [],
+        suggestedAlternatives: fatalError.suggestedAlternatives || [],
+        modelRequested: fatalError.modelRequested,
+      });
+    }
+    if (!res) throw new Error('SSE завершился без события done');
+
+    loadingEl._timeline?.complete(res.brokenProject ? 'error' : 'done');
+    // Через секунду убираем «крутилку», оставляя ассистент-сообщение
+    setTimeout(() => removeAssistantLoadingBubble(loadingEl), 600);
+
     state.currentId = res.id;
     state.currentMessages.push({ role: 'assistant', content: res.assistant });
     addMessageToDOM('assistant', res.assistant);
-    els.chatTitle.textContent = res.title;
+    els.chatTitle.textContent = res.title || els.chatTitle.textContent || prompt.slice(0, 60);
     const pu = res.projectUsage || { calls: 0, total: 0 };
     const filesNote = (res.files && res.files.length > 1) ? ` • ${res.files.length} файлов` : '';
     els.chatSub.textContent = `id: ${res.id.slice(0, 8)} • ${res.modelUsed || res.model} • ${pu.calls} вызовов, ${pu.total.toLocaleString('ru-RU')} токенов${filesNote}`;
+
     if (res.hasHtml && !res.brokenProject) {
       showPreview(res.id, res.files || ['index.html']);
     } else if (res.brokenProject) {
       hidePreview();
       buildBrokenProjectBubble(res, model);
     }
+    // Карточка ревьюера (только если smoke ok и suggestions есть)
+    if (Array.isArray(res.suggestions) && res.suggestions.length) {
+      const reviewerWrap = buildReviewerCard(res.suggestions, res.reviewerRating);
+      if (reviewerWrap) {
+        els.messages.appendChild(reviewerWrap);
+        els.messages.scrollTop = els.messages.scrollHeight;
+      }
+    }
     await loadProjects();
-    const fb = res.fallbackFrom ? ` (fallback с ${res.fallbackFrom})` : '';
+    refreshProviderStatus();
     if (res.brokenProject) {
       els.status.innerHTML = `<span class="dot err"></span>проект битый · повторите или смените модель`;
     } else {
-      els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage.total} токенов${fb}`;
+      els.status.innerHTML = `<span class="dot"></span>готово • ${res.usage?.total || 0} токенов`;
     }
   } catch (e) {
     removeAssistantLoadingBubble(loadingEl);

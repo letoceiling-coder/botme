@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Media Studio · Botme</title>
+  <link rel="icon" href="/brand/botme.jpg">
+  <link rel="stylesheet" href="/media/media.css">
+</head>
+<body>
+  <!-- ============== Top bar ============== -->
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" class="back" title="К главной">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </a>
+      <img src="/brand/botme.jpg" alt="" class="logo">
+      <div class="brand-text">
+        <div class="brand-title">AI Media Studio</div>
+        <div class="brand-sub" id="projectTitle">Untitled space</div>
+      </div>
+    </div>
+
+    <div class="topbar-center">
+      <button class="btn btn-ghost" id="btnNew" title="Новый проект (Ctrl+N)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Новый
+      </button>
+      <button class="btn btn-ghost" id="btnProjects" title="Список проектов">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+        Проекты
+      </button>
+      <button class="btn btn-ghost" id="btnRename" title="Переименовать">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+        Переименовать
+      </button>
+    </div>
+
+    <div class="topbar-right">
+      <span class="save-status" id="saveStatus">сохранено</span>
+      <button class="btn btn-ghost" id="btnUsage" title="Расход токенов и средств">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M7 14l4-4 4 4 5-5"/></svg>
+        Usage
+      </button>
+      <button class="btn btn-primary" id="btnRun" title="Run from here · Ctrl+Enter">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"/></svg>
+        Run
+      </button>
+      <a href="/" class="user" title="Выйти из медиа-студии">⌂</a>
+    </div>
+  </header>
+
+  <!-- ============== Canvas ============== -->
+  <main class="stage">
+    <!-- Слева: компактная палитра-стрипа с категориями -->
+    <aside class="rail" id="rail">
+      <button class="rail-btn" data-add="text" title="Text">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+      </button>
+      <button class="rail-btn" data-add="assistant" title="Assistant (LLM)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4M5 8a7 7 0 0 1 14 0v6a7 7 0 0 1-14 0V8zM9 14h.01M15 14h.01"/></svg>
+      </button>
+      <button class="rail-btn" data-add="image" title="Image Generator">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+      </button>
+      <button class="rail-btn" data-add="video" title="Video Generator">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m22 8-6 4 6 4V8z"/></svg>
+      </button>
+      <button class="rail-btn" data-add="upscale" title="Image Upscaler">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 14h7v7h-7zM14 3l7 7M3 14l7 7"/></svg>
+      </button>
+      <button class="rail-btn" data-add="audio" title="Audio (TTS)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13M9 18a3 3 0 0 1-3 3 3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3zM21 16a3 3 0 0 1-3 3 3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3z"/></svg>
+      </button>
+      <div class="rail-sep"></div>
+      <button class="rail-btn" data-add="upload" title="Upload">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+      </button>
+      <button class="rail-btn" data-add="stock" title="Stock images">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </button>
+      <button class="rail-btn" data-add="list" title="List">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+      </button>
+    </aside>
+
+    <!-- Сам бесконечный холст -->
+    <div class="canvas-wrap" id="canvasWrap">
+      <svg id="canvasSvg" class="canvas">
+        <defs>
+          <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="rgba(255,255,255,0.06)"/>
+          </pattern>
+          <pattern id="grid-major" width="160" height="160" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1.4" fill="rgba(255,255,255,0.10)"/>
+          </pattern>
+          <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%"  stop-color="#7c5cff"/>
+            <stop offset="100%" stop-color="#22d3ee"/>
+          </linearGradient>
+          <filter id="nodeGlow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="6" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <g id="viewport">
+          <rect class="grid-bg" x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid)"/>
+          <rect class="grid-bg" x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid-major)"/>
+          <g id="edgesLayer"></g>
+          <g id="nodesLayer"></g>
+          <g id="overlayLayer"></g>
+        </g>
+      </svg>
+
+      <!-- HUD: статус-бар внизу справа (zoom, mini-map) -->
+      <div class="hud">
+        <button class="hud-btn" id="btnFit" title="Fit to view (F)">⤢ fit</button>
+        <button class="hud-btn" id="btnZoomOut" title="Zoom out">−</button>
+        <span class="hud-zoom" id="hudZoom">100%</span>
+        <button class="hud-btn" id="btnZoomIn" title="Zoom in">+</button>
+      </div>
+
+      <!-- Кнопка добавить узел в центр (когда канвас пустой) -->
+      <button class="empty-add" id="emptyAdd" hidden>
+        <span>+</span>
+        <span>добавь первый узел</span>
+      </button>
+    </div>
+  </main>
+
+  <!-- ============== Палитра (открывается по клавише `+` или клик в пустоту) ============== -->
+  <div class="palette" id="palette" hidden>
+    <input type="search" class="palette-search" id="paletteSearch" placeholder="Поиск узла…">
+    <div class="palette-cat">BASICS</div>
+    <button class="palette-item" data-add="text">
+      <span class="palette-icon">T</span>
+      <span><b>Text</b><i>заметка / промпт с форматированием</i></span>
+    </button>
+    <button class="palette-item" data-add="assistant">
+      <span class="palette-icon">✱</span>
+      <span><b>Assistant</b><i>чат с LLM (Claude / GPT / Gemini)</i></span>
+    </button>
+    <button class="palette-item" data-add="image">
+      <span class="palette-icon">▦</span>
+      <span><b>Image Generator</b><i>FLUX / SDXL / Recraft через Replicate</i></span>
+    </button>
+    <button class="palette-item" data-add="video">
+      <span class="palette-icon">▷</span>
+      <span><b>Video Generator</b><i>Kling / Veo / Hunyuan через Replicate</i></span>
+    </button>
+    <button class="palette-item" data-add="upscale">
+      <span class="palette-icon">⤢</span>
+      <span><b>Image Upscaler</b><i>clarity-upscaler — Magnific-style апскейл</i></span>
+    </button>
+    <button class="palette-item" data-add="audio">
+      <span class="palette-icon">♪</span>
+      <span><b>Audio (TTS)</b><i>озвучка через ElevenLabs</i></span>
+    </button>
+    <button class="palette-item" data-add="list">
+      <span class="palette-icon">≡</span>
+      <span><b>List</b><i>массив значений (для batch-генерации)</i></span>
+    </button>
+    <div class="palette-cat">MEDIA</div>
+    <button class="palette-item" data-add="upload">
+      <span class="palette-icon">↑</span>
+      <span><b>Upload</b><i>загрузить изображение / референс</i></span>
+    </button>
+    <button class="palette-item" data-add="stock">
+      <span class="palette-icon">⬚</span>
+      <span><b>Stock</b><i>стоковая библиотека (заглушка)</i></span>
+    </button>
+  </div>
+
+  <!-- ============== Контекстное меню узла ============== -->
+  <div class="ctx" id="nodeCtx" hidden>
+    <button data-act="run">▶ Run</button>
+    <button data-act="preview">👁 Open preview</button>
+    <button data-act="duplicate">⧉ Duplicate</button>
+    <button data-act="delete">🗑 Delete</button>
+  </div>
+
+  <!-- ============== Список проектов (drawer справа) ============== -->
+  <aside class="drawer" id="drawer" hidden>
+    <div class="drawer-head">
+      <div>Мои проекты</div>
+      <button class="btn btn-ghost" id="drawerClose">✕</button>
+    </div>
+    <div class="drawer-list" id="drawerList"></div>
+  </aside>
+
+  <!-- ============== Toast ============== -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script type="module" src="/auth-fetch.js"></script>
+  <script type="module" src="/media/api.js"></script>
+  <script type="module" src="/media/nodes.js?v=4"></script>
+  <script type="module" src="/media/canvas.js?v=4"></script>
+  <script type="module" src="/media/usage.js"></script>
+</body>
+</html>
