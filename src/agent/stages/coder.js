@@ -161,11 +161,12 @@ export async function runCoder({
   }
 
   try {
+    const maxIters = plan?.kind === 'react-bundle' ? 24 : 16;
     const result = await callModelWithToolsAndFallback({
       modelId: coderModel,
       messages,
       tools: TOOL_DECLARATIONS,
-      maxIters: 16,
+      maxIters,
       maxTokens: 16000,
       temperature: 0.3,
       onText: (delta) => bus.emit('coder.token', { delta }),
@@ -176,7 +177,9 @@ export async function runCoder({
         const summary = summariseResult(name, r);
         bus.toolResult(name, callId, !!r.ok, summary, r.ok ? null : (r.error || 'неизвестно'));
         if (name === 'run_smoke') lastSmoke = r;
-        if (name === 'finish_generation') finishedMessage = r.message || '';
+        if (name === 'finish_generation' && r?.ok) {
+          finishedMessage = r.message || '';
+        }
         return r;
       },
       onProgress: (info) => {
@@ -261,6 +264,9 @@ function summariseResult(name, r) {
       warnings: (r.warnings || []).slice(0, 2),
     };
   }
-  if (name === 'finish_generation') return { message: (r.message || '').slice(0, 100) };
+  if (name === 'finish_generation') {
+    if (!r.ok) return { rejected: true, error: String(r.error || '').slice(0, 160) };
+    return { message: (r.message || '').slice(0, 100) };
+  }
   return null;
 }

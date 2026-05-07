@@ -25,6 +25,7 @@ import {
   buildContextBlockForPrompt,
 } from '../context7.js';
 import { buildProject as buildBundle, isBundleProject } from '../builder/esbuild-runner.js';
+import { isReactBundleAppPlaceholder } from '../project-validator.js';
 
 const MAX_FILE_BYTES = 1_000_000;        // защита от огромных read_file
 const MAX_WRITE_BYTES = 2_000_000;       // защита от огромных write_file
@@ -97,9 +98,9 @@ export const TOOL_DECLARATIONS = [
   {
     name: 'run_smoke',
     description:
-      'Прогнать smoke-тест собранного index.html (Playwright headless Chromium с fallback на jsdom). ' +
-      'Возвращает список ошибок страницы, упавших HTTP-запросов и предупреждений. ' +
-      'Используй ПЕРЕД finish_generation для самопроверки.',
+      'Прогнать smoke-сборку: для react-bundle читается dist/index.html после rebuild_bundle ' +
+      '(корневой index — копия шаблона, не использовать для самопроверки). Playwright загружает живое превью; ' +
+      'fallback на jsdom по тексту этого HTML. Перед finish_generation.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -113,8 +114,10 @@ export const TOOL_DECLARATIONS = [
   {
     name: 'finish_generation',
     description:
-      'Сообщить, что код готов и smoke-тесты прошли. Завершает работу Coder-стадии. ' +
-      'Вызывай только после run_smoke с ok=true (или явно при патч-режиме на простой правке).',
+      'Сообщить, что код готов. Завершает Coder-стадии только если ok=true. ' +
+      'Для react-bundle сервер отклонит вызов, пока src/App.tsx — стартовая заглушка «Шаблон react-bundle»: ' +
+      'нужно реализовать запрос пользователя в коде, rebuild_bundle → run_smoke → снова finish_generation. ' +
+      'Иначе — после run_smoke с ok=true.',
     parameters: {
       type: 'object',
       properties: {
@@ -211,12 +214,32 @@ export async function execute(name, rawArgs, ctx) {
     }
 
     case 'run_smoke': {
-      // Сначала пробуем Playwright через smokeRunner (если передан в ctx),
-      // иначе fallback на jsdom-smokeTestHtml.
+      // Для react-bundle превью и реальные бандлы — в dist/index.html; корневой index — копия шаблона.
       try {
-        const indexAbs = path.join(projectDir, 'index.html');
+        const rootIndex = path.join(projectDir, 'index.html');
+        const distIndex = path.join(projectDir, 'dist', 'index.html');
+        let indexAbs = rootIndex;
+
+        const distOk = await fs.access(distIndex).then(() => true).catch(() => false);
+        let preferDist = false;
+        try {
+          const meta = JSON.parse(await fs.readFile(path.join(projectDir, 'meta.json'), 'utf8'));
+          preferDist = meta?.kind === 'react-bundle' && distOk;
+        } catch {
+          const mainTsx = path.join(projectDir, 'src', 'main.tsx');
+          preferDist = distOk && await fs.access(mainTsx).then(() => true).catch(() => false);
+        }
+        if (preferDist) indexAbs = distIndex;
+
         const indexExists = await fs.access(indexAbs).then(() => true).catch(() => false);
-        if (!indexExists) return { ok: false, error: 'index.html отсутствует' };
+        if (!indexExists) {
+          return {
+            ok: false,
+            error: preferDist
+              ? 'dist/index.html отсутствует — сначала rebuild_bundle для react-bundle'
+              : 'index.html отсутствует',
+          };
+        }
         const indexHtml = await fs.readFile(indexAbs, 'utf8');
 
         if (typeof ctx.smokeRunner === 'function') {
@@ -248,6 +271,26 @@ export async function execute(name, rawArgs, ctx) {
     }
 
     case 'finish_generation': {
+      try {
+        const bundle = await isBundleProject(projectDir).catch(() => false);
+        if (bundle) {
+          const appPath = path.join(projectDir, 'src', 'App.tsx');
+          let appText = '';
+          try {
+            appText = await fs.readFile(appPath, 'utf8');
+          } catch { /* нет файла */ }
+          if (appText && isReactBundleAppPlaceholder(appText)) {
+            return {
+              ok: false,
+              finished: false,
+              error:
+                'Отклонено: в src/App.tsx всё ещё стартовый шаблон («Шаблон react-bundle»). ' +
+                'Реализуй запрос пользователя в коде (src/App.tsx и при нужде другие файлы под src/), ' +
+                'удали заглушку, затем rebuild_bundle → run_smoke → finish_generation.',
+            };
+          }
+        }
+      } catch { /* не блокируем при сбое проверки */ }
       return { ok: true, finished: true, message: String(args.message || '') };
     }
 
